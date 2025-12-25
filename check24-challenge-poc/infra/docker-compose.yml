@@ -1,0 +1,24 @@
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  home-core:
+    build: ../services/home-core
+    environment:
+      REDIS_URL: redis://redis:6379
+      INGEST_KEYS_JSON: '{"travel":"dev-secret-123"}'
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+
+  speedboat-travel:
+    build: ../services/speedboat-travel
+    environment:
+      CORE_URL: http://home-core:3000
+      PRODUCT_ID: travel
+      INGEST_API_KEY: dev-secret-123
+    depends_on:
+      - home-core
