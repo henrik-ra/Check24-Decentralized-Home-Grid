@@ -17,6 +17,11 @@ function parseIngestKeysJson(value) {
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const ingestKeys = parseIngestKeysJson(process.env.INGEST_KEYS_JSON || DEFAULT_INGEST_KEYS_JSON);
 
+// Read-path resilience settings
+const redisReadTimeoutMs = Number.parseInt(process.env.REDIS_READ_TIMEOUT_MS || '40', 10);
+const lkgTtlMs = Number.parseInt(process.env.LKG_TTL_MS || `${5 * 60 * 1000}` /* 5 min */, 10);
+const lkgMaxEntries = Number.parseInt(process.env.LKG_MAX_ENTRIES || '5000', 10);
+
 const widgetSoftTtlSeconds = Number.parseInt(process.env.WIDGET_SOFT_TTL_SECONDS || '60', 10);
 const widgetHardTtlSeconds = Number.parseInt(process.env.WIDGET_HARD_TTL_SECONDS || '3600', 10);
 const indexTtlSeconds = Number.parseInt(process.env.INDEX_TTL_SECONDS || '604800', 10); // 7 days
@@ -48,6 +53,65 @@ function nowIso() {
 	return new Date().toISOString();
 }
 
+function withTimeout(promise, timeoutMs, label) {
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+
+	return Promise.race([
+		promise,
+		new Promise((_, reject) => {
+			const id = setTimeout(() => {
+				clearTimeout(id);
+				const error = new Error(`${label || 'operation'} timed out after ${timeoutMs}ms`);
+				error.code = 'ETIMEDOUT';
+				reject(error);
+			}, timeoutMs);
+		}),
+	]);
+}
+
+function assertFinitePositiveNumber(value, fallback) {
+	return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const lastKnownGoodHomeByUser = new Map();
+
+function lkgPruneExpired() {
+	const now = Date.now();
+	for (const [key, entry] of lastKnownGoodHomeByUser.entries()) {
+		if (!entry || entry.expiresAtMs <= now) {
+			lastKnownGoodHomeByUser.delete(key);
+		}
+	}
+}
+
+function lkgGet(userId) {
+	const entry = lastKnownGoodHomeByUser.get(userId);
+	if (!entry) return undefined;
+	if (entry.expiresAtMs <= Date.now()) {
+		lastKnownGoodHomeByUser.delete(userId);
+		return undefined;
+	}
+
+	// Refresh recency (Map preserves insertion order)
+	lastKnownGoodHomeByUser.delete(userId);
+	lastKnownGoodHomeByUser.set(userId, entry);
+	return entry.value;
+}
+
+function lkgSet(userId, value) {
+	lkgPruneExpired();
+	const maxEntries = assertFinitePositiveNumber(lkgMaxEntries, 5000);
+	const ttl = assertFinitePositiveNumber(lkgTtlMs, 5 * 60 * 1000);
+
+	lastKnownGoodHomeByUser.delete(userId);
+	lastKnownGoodHomeByUser.set(userId, { value, expiresAtMs: Date.now() + ttl });
+
+	while (lastKnownGoodHomeByUser.size > maxEntries) {
+		const oldestKey = lastKnownGoodHomeByUser.keys().next().value;
+		lastKnownGoodHomeByUser.delete(oldestKey);
+	}
+}
+
 function addSecondsToIso(isoString, seconds) {
 	return new Date(new Date(isoString).getTime() + seconds * 1000).toISOString();
 }
@@ -75,6 +139,16 @@ function getHeader(request, name) {
 
 function assertFinitePositiveInt(value, fallback) {
 	return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function buildEmptyHomeResponse({ degraded, reason }) {
+	return {
+		schemaVersion: '1.0',
+		generatedAt: nowIso(),
+		greeting: 'Willkommen',
+		widgets: [],
+		...(degraded ? { meta: { degraded: true, reason: reason || 'unavailable', source: 'empty' } } : {}),
+	};
 }
 
 function getContentLengthBytes(request) {
@@ -218,60 +292,66 @@ fastify.get('/api/home', async (request, reply) => {
 	const userId = String(getHeader(request, 'x-user-id') || 'anon').trim();
 	const userIndexKey = buildUserIndexKey(userId);
 
-	let widgetKeys;
 	try {
-		widgetKeys = await redis.sMembers(userIndexKey);
+		const widgetKeys = await withTimeout(redis.sMembers(userIndexKey), redisReadTimeoutMs, 'redis.sMembers(userIndexKey)');
+		if (!widgetKeys || widgetKeys.length === 0) {
+			const response = buildEmptyHomeResponse({ degraded: false });
+			lkgSet(userId, response);
+			return reply.send(response);
+		}
+
+		const rawWidgets = await withTimeout(redis.mGet(widgetKeys), redisReadTimeoutMs, 'redis.mGet(widgetKeys)');
+
+		const expiredKeys = [];
+		const widgets = [];
+
+		for (let index = 0; index < widgetKeys.length; index += 1) {
+			const key = widgetKeys[index];
+			const raw = rawWidgets[index];
+			if (raw === null) {
+				expiredKeys.push(key);
+				continue;
+			}
+
+			try {
+				widgets.push(JSON.parse(raw));
+			} catch {
+				expiredKeys.push(key);
+			}
+		}
+
+		if (expiredKeys.length > 0) {
+			// best-effort cleanup; do not fail request
+			const redisCleanup = redis.sRem(userIndexKey, expiredKeys).catch((error) => {
+				request.log.warn({ error }, 'Failed to cleanup expired index entries');
+			});
+			void redisCleanup;
+		}
+
+		widgets.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+		const response = {
+			schemaVersion: '1.0',
+			generatedAt: nowIso(),
+			greeting: 'Willkommen zurück!',
+			widgets,
+		};
+		lkgSet(userId, response);
+		return reply.send(response);
 	} catch (error) {
-		request.log.error({ error }, 'Failed to read user index');
-		return reply.status(500).send({ error: 'Storage Failure' });
-	}
+		request.log.warn({ error: { message: error?.message, code: error?.code }, userId }, 'Home read degraded (redis unavailable)');
 
-	if (!widgetKeys || widgetKeys.length === 0) {
-		return reply.send({ schemaVersion: '1.0', generatedAt: nowIso(), greeting: 'Willkommen', widgets: [] });
-	}
-
-	let rawWidgets;
-	try {
-		rawWidgets = await redis.mGet(widgetKeys);
-	} catch (error) {
-		request.log.error({ error }, 'Failed to read snapshots');
-		return reply.status(500).send({ error: 'Storage Failure' });
-	}
-
-	const expiredKeys = [];
-	const widgets = [];
-
-	for (let index = 0; index < widgetKeys.length; index += 1) {
-		const key = widgetKeys[index];
-		const raw = rawWidgets[index];
-		if (raw === null) {
-			expiredKeys.push(key);
-			continue;
+		const cached = lkgGet(userId);
+		if (cached) {
+			return reply.send({
+				...cached,
+				generatedAt: nowIso(),
+				meta: { degraded: true, reason: 'redis_unavailable', source: 'lkg' },
+			});
 		}
 
-		try {
-			widgets.push(JSON.parse(raw));
-		} catch {
-			expiredKeys.push(key);
-		}
+		return reply.send(buildEmptyHomeResponse({ degraded: true, reason: 'redis_unavailable' }));
 	}
-
-	if (expiredKeys.length > 0) {
-		try {
-			await redis.sRem(userIndexKey, expiredKeys);
-		} catch (error) {
-			request.log.warn({ error }, 'Failed to cleanup expired index entries');
-		}
-	}
-
-	widgets.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-	return reply.send({
-		schemaVersion: '1.0',
-		generatedAt: nowIso(),
-		greeting: 'Willkommen zurück!',
-		widgets,
-	});
 });
 
 async function start() {

@@ -1,27 +1,88 @@
 # check24-challenge-poc
 
-Monorepo skeleton for the CHECK24 technical concept challenge.
+PoC implementation for the CHECK24 GenDev Technical Concept Challenge.
 
-## Folders
-- `services/home-core`: Home Core API (ingest + home)
-- `services/speedboat-travel`: Mock speedboat pushing snapshots
-- `frontend-web`: Web client (React/Vite)
-- `frontend-mobile`: Android client (Kotlin/Compose)
-- `infra/docker-compose.yml`: Local dev stack
-- `docs`: Concept + integration guideline
+This repository demonstrates a **push-based snapshot** Home Widgets platform:
+- Product teams (“speedboats”) push user-specific widget snapshots.
+- The Home read-path (`GET /api/home`) reads only from Home-controlled storage (Redis) and degrades gracefully on outages.
+- Web and Android clients render the same SDUI component payload.
 
-## Local dev
+## Repository structure
+- `services/home-core`: Home Core API (Fastify + Redis)
+- `services/speedboat-travel`: Example speedboat that pushes snapshots
+- `frontend-web`: Web client (React + Vite + TypeScript)
+- `frontend-mobile/android`: Android client (Kotlin + Jetpack Compose)
+- `infra/docker-compose.yml`: Local dev stack (Redis + services)
+- `docs`: Architecture and integration docs
 
-### Backend + Redis + Speedboat (Docker)
-- `docker compose -f infra/docker-compose.yml up --build`
-- Home API: `http://localhost:3000/api/home`
+## Quickstart (recommended)
 
-### Web (Vite)
-- `cd frontend-web`
-- `npm install`
-- `npm run dev`
+### 1) Start backend + redis + demo speedboat
+From this folder (`check24-challenge-poc`):
 
-### Android (Native)
-- Open the Android project in Android Studio: `frontend-mobile/android`
-- Emulator uses host URL: `http://10.0.2.2:3000/`
-- Note: HTTP is allowed only in the `debug` build type (release requires HTTPS).
+```powershell
+docker compose -f infra/docker-compose.yml up --build
+```
+
+Endpoints:
+- Health: `GET http://localhost:3000/health`
+- Home: `GET http://localhost:3000/api/home` (requires header `x-user-id`)
+- Ingest: `POST http://localhost:3000/api/ingest` (requires `x-product-id` + `x-api-key`)
+
+### 1b) (Demo) Redis outage should not break Home
+This showcases **High Availability by Design**: Home stays available even if Redis is down.
+
+```powershell
+# 1) Warm up: get a normal response
+Invoke-RestMethod -Uri "http://localhost:3000/api/home" -Headers @{ "x-user-id" = "1" } | ConvertTo-Json -Depth 6
+
+# 2) Simulate outage
+docker compose -f infra/docker-compose.yml stop redis
+
+# 3) Home still returns 200, but includes meta.degraded
+Invoke-RestMethod -Uri "http://localhost:3000/api/home" -Headers @{ "x-user-id" = "1" } | ConvertTo-Json -Depth 6
+
+# 4) Recover
+docker compose -f infra/docker-compose.yml up -d redis
+```
+
+### 2) Start the web client
+```powershell
+cd frontend-web
+npm install
+npm run dev
+```
+
+Web defaults to `http://localhost:3000` as API base.
+To point it elsewhere:
+- `VITE_API_BASE_URL=http://localhost:3000`
+
+## Android client
+
+Open the Android project in Android Studio:
+- `frontend-mobile/android`
+
+Networking:
+- Emulator reaches the host machine via `http://10.0.2.2:3000/`
+- Cleartext HTTP is enabled only for the `debug` build type (release assumes HTTPS)
+
+## Configuration
+
+### Home Core (service)
+Environment variables (defaults in parentheses):
+- `REDIS_URL` (`redis://localhost:6379`)
+- `INGEST_KEYS_JSON` (`{ "travel": "dev-secret-123" }`)
+- `MAX_INGEST_PAYLOAD_BYTES` (`65536`)
+- `INGEST_RATE_LIMIT_PER_MINUTE` (`120`)
+- `WIDGET_SOFT_TTL_SECONDS` (`60`)
+- `WIDGET_HARD_TTL_SECONDS` (`3600`)
+- `INDEX_TTL_SECONDS` (`604800`)
+- `IDEMPOTENCY_TTL_SECONDS` (`300`)
+- `REDIS_READ_TIMEOUT_MS` (`40`)
+- `LKG_TTL_MS` (`300000`)
+- `LKG_MAX_ENTRIES` (`5000`)
+
+## Documentation
+
+- Architecture and design: [docs/CONCEPT.md](docs/CONCEPT.md)
+- Integration guide for speedboats: [docs/DEVELOPER_GUIDELINE.md](docs/DEVELOPER_GUIDELINE.md)
