@@ -1,5 +1,5 @@
-const fastify = require('fastify')({ logger: true });
 const cors = require('@fastify/cors');
+const fastifyFactory = require('fastify');
 const { createClient } = require('redis');
 
 const DEFAULT_INGEST_KEYS_JSON = '{"travel":"dev-secret-123"}';
@@ -22,6 +22,16 @@ const widgetHardTtlSeconds = Number.parseInt(process.env.WIDGET_HARD_TTL_SECONDS
 const indexTtlSeconds = Number.parseInt(process.env.INDEX_TTL_SECONDS || '604800', 10); // 7 days
 const idempotencyTtlSeconds = Number.parseInt(process.env.IDEMPOTENCY_TTL_SECONDS || '300', 10);
 const maxPayloadBytes = Number.parseInt(process.env.MAX_INGEST_PAYLOAD_BYTES || '65536', 10); // 64KB
+
+// Rate limiting (per productId)
+const ingestRateLimitPerMinute = Number.parseInt(process.env.INGEST_RATE_LIMIT_PER_MINUTE || '120', 10);
+const ingestRateLimitWindowSeconds = 60;
+
+const fastify = fastifyFactory({
+	logger: true,
+	// Enforce max request payload size at the framework level.
+	bodyLimit: Number.isFinite(maxPayloadBytes) && maxPayloadBytes > 0 ? maxPayloadBytes : 65536,
+});
 
 const redis = createClient({ url: redisUrl });
 redis.on('error', (error) => fastify.log.error({ error }, 'Redis client error'));
@@ -54,6 +64,10 @@ function buildIdempotencyKey(productId, idempotencyKey) {
 	return `idempo:${productId}:${idempotencyKey}`;
 }
 
+function buildRateLimitKey(productId, windowStartEpochSeconds) {
+	return `rl:${productId}:${windowStartEpochSeconds}`;
+}
+
 function getHeader(request, name) {
 	// Node lower-cases headers internally
 	return request.headers[name];
@@ -61,6 +75,37 @@ function getHeader(request, name) {
 
 function assertFinitePositiveInt(value, fallback) {
 	return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getContentLengthBytes(request) {
+	const raw = request.headers['content-length'];
+	if (raw === undefined) return undefined;
+	const parsed = Number.parseInt(String(raw), 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function getWindowStartEpochSeconds(nowEpochSeconds, windowSeconds) {
+	return Math.floor(nowEpochSeconds / windowSeconds) * windowSeconds;
+}
+
+async function enforceRateLimitOrThrow(productId) {
+	const limit = assertFinitePositiveInt(ingestRateLimitPerMinute, 120);
+	const nowEpochSeconds = Math.floor(Date.now() / 1000);
+	const windowStart = getWindowStartEpochSeconds(nowEpochSeconds, ingestRateLimitWindowSeconds);
+	const key = buildRateLimitKey(productId, windowStart);
+
+	const count = await redis.incr(key);
+	if (count === 1) {
+		await redis.expire(key, ingestRateLimitWindowSeconds);
+	}
+
+	if (count > limit) {
+		const retryAfterSeconds = windowStart + ingestRateLimitWindowSeconds - nowEpochSeconds;
+		const error = new Error('Rate limit exceeded');
+		error.statusCode = 429;
+		error.retryAfterSeconds = Math.max(0, retryAfterSeconds);
+		throw error;
+	}
 }
 
 const ingestBodySchema = {
@@ -100,9 +145,21 @@ fastify.post(
 			return reply.status(403).send({ error: 'Forbidden' });
 		}
 
-		const rawBodyBytes = Buffer.byteLength(JSON.stringify(request.body), 'utf8');
-		if (rawBodyBytes > maxPayloadBytes) {
+		// Extra guard: if content-length is known and too big, fail fast.
+		const contentLengthBytes = getContentLengthBytes(request);
+		if (contentLengthBytes !== undefined && contentLengthBytes > maxPayloadBytes) {
 			return reply.status(413).send({ error: 'Payload too large' });
+		}
+
+		try {
+			await enforceRateLimitOrThrow(productId);
+		} catch (error) {
+			if (error && error.statusCode === 429) {
+				reply.header('retry-after', String(error.retryAfterSeconds ?? 60));
+				return reply.status(429).send({ error: 'Rate limit exceeded' });
+			}
+			request.log.error({ error }, 'Rate limit check failed');
+			return reply.status(500).send({ error: 'Storage Failure' });
 		}
 
 		const idempotencyKey = String(getHeader(request, 'idempotency-key') || '').trim();
