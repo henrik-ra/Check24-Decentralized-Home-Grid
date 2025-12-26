@@ -57,6 +57,39 @@ Web defaults to `http://localhost:3000` as API base.
 To point it elsewhere:
 - `VITE_API_BASE_URL=http://localhost:3000`
 
+## Azure deploy (IaC)
+
+This repo includes a repeatable Azure deployment for:
+- Azure Container Apps (Home Core + demo speedboat)
+- Azure Cache for Redis
+- Azure Container Registry (builds run via `az acr build`; no local Docker required)
+- Azure Storage static website hosting (web frontend)
+
+Prerequisites:
+- Azure CLI installed and logged in (`az login`)
+- Node.js + npm installed (to build the web frontend)
+
+Deploy:
+```powershell
+cd infra/azure
+
+# IMPORTANT: Ingest keys must be valid JSON.
+# Use single quotes in PowerShell so the JSON stays intact.
+./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest -IngestKeysJson '{"travel":"dev-secret-123"}'
+```
+
+After deploy, the script prints:
+- Public backend URL (Container App)
+- Public frontend URL (Azure Storage static website)
+
+Run the web client locally against the Azure API:
+```powershell
+cd frontend-web
+$env:VITE_API_BASE_URL = "https://<your-containerapp-fqdn>"
+npm install
+npm run dev
+```
+
 ## Android client
 
 Open the Android project in Android Studio:

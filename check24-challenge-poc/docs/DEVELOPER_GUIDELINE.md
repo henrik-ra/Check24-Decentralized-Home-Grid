@@ -104,16 +104,16 @@ You need a Redis instance reachable at `REDIS_URL`.
 Start Home Core:
 - `cd services/home-core`
 - `npm install`
-- `set REDIS_URL=redis://localhost:6379`
-- `set INGEST_KEYS_JSON={"travel":"dev-secret-123"}`
+- `$env:REDIS_URL = "redis://localhost:6379"`
+- `$env:INGEST_KEYS_JSON = '{"travel":"dev-secret-123"}'`
 - `npm start`
 
 Start Speedboat:
 - `cd services/speedboat-travel`
 - `npm install`
-- `set CORE_URL=http://localhost:3000`
-- `set PRODUCT_ID=travel`
-- `set INGEST_API_KEY=dev-secret-123`
+- `$env:CORE_URL = "http://localhost:3000"`
+- `$env:PRODUCT_ID = "travel"`
+- `$env:INGEST_API_KEY = "dev-secret-123"`
 - `npm start`
 
 ## Example requests
