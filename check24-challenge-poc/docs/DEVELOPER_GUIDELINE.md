@@ -71,7 +71,10 @@ Returns `widgets[]` already sorted by priority.
 
 ### Home Core environment variables
 - `REDIS_URL` (default: `redis://localhost:6379`)
-- `INGEST_KEYS_JSON` (default: `{ "travel": "dev-secret-123" }`)
+- `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
+
+Ingest auth keys follow the pattern `INGEST_KEY_<PRODUCT_ID_UPPER_SNAKE>`.
+Example: `x-product-id: travel` -> `INGEST_KEY_TRAVEL`.
 - `MAX_INGEST_PAYLOAD_BYTES` (default: `65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (default: `120`)
 - `WIDGET_SOFT_TTL_SECONDS` (default: `60`)
@@ -105,7 +108,7 @@ Start Home Core:
 - `cd services/home-core`
 - `npm install`
 - `$env:REDIS_URL = "redis://localhost:6379"`
-- `$env:INGEST_KEYS_JSON = '{"travel":"dev-secret-123"}'`
+- `$env:INGEST_KEY_TRAVEL = "dev-secret-123"`
 - `npm start`
 
 Start Speedboat:

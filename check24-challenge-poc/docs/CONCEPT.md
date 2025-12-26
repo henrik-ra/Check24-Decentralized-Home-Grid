@@ -140,7 +140,7 @@ This PoC is intentionally simple, but the pattern scales:
 
 Home Core reads configuration from environment variables:
 - `REDIS_URL` (default: `redis://localhost:6379`)
-- `INGEST_KEYS_JSON` (default: `{ "travel": "dev-secret-123" }`)
+- `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
 - `MAX_INGEST_PAYLOAD_BYTES` (default: `65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (default: `120`)
 - `WIDGET_SOFT_TTL_SECONDS` (default: `60`)

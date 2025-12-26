@@ -2,20 +2,29 @@ const cors = require('@fastify/cors');
 const fastifyFactory = require('fastify');
 const { createClient } = require('redis');
 
-const DEFAULT_INGEST_KEYS_JSON = '{"travel":"dev-secret-123"}';
+function normalizeProductIdToEnvSuffix(productId) {
+	return String(productId)
+		.toUpperCase()
+		.replace(/[^A-Z0-9]+/g, '_')
+		.replace(/^_+|_+$/g, '');
+}
 
-function parseIngestKeysJson(value) {
-	try {
-		const parsed = JSON.parse(value);
-		if (!parsed || typeof parsed !== 'object') return {};
-		return parsed;
-	} catch {
-		return {};
-	}
+const DEFAULT_INGEST_KEYS_BY_SUFFIX = {
+	TRAVEL: 'dev-secret-123',
+};
+
+function getIngestKeyForProduct(productId) {
+	const suffix = normalizeProductIdToEnvSuffix(productId);
+	if (!suffix) return undefined;
+	return process.env[`INGEST_KEY_${suffix}`] || DEFAULT_INGEST_KEYS_BY_SUFFIX[suffix];
 }
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const ingestKeys = parseIngestKeysJson(process.env.INGEST_KEYS_JSON || DEFAULT_INGEST_KEYS_JSON);
+
+// IMPORTANT: Ingest auth is configured per product via env vars:
+// - INGEST_KEY_TRAVEL
+// - INGEST_KEY_INSURANCE_LIABILITY
+// etc.
 
 // Read-path resilience settings
 const redisReadTimeoutMs = Number.parseInt(process.env.REDIS_READ_TIMEOUT_MS || '40', 10);
@@ -214,8 +223,9 @@ fastify.post(
 	async (request, reply) => {
 		const productId = String(getHeader(request, 'x-product-id') || '').trim();
 		const apiKey = String(getHeader(request, 'x-api-key') || '').trim();
+		const expectedKey = productId ? String(getIngestKeyForProduct(productId) || '').trim() : '';
 
-		if (!productId || !apiKey || ingestKeys[productId] !== apiKey) {
+		if (!productId || !apiKey || !expectedKey || expectedKey !== apiKey) {
 			return reply.status(403).send({ error: 'Forbidden' });
 		}
 

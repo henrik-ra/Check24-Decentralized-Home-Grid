@@ -8,6 +8,7 @@ export function getApiBaseUrl(): string {
 
 export async function fetchHome(userId: string): Promise<HomeResponse> {
   const response = await fetch(`${getApiBaseUrl()}/api/home`, {
+    cache: 'no-store',
     headers: {
       'x-user-id': userId,
     },

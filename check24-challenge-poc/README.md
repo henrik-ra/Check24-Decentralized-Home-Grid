@@ -73,9 +73,11 @@ Deploy:
 ```powershell
 cd infra/azure
 
-# IMPORTANT: Ingest keys must be valid JSON.
-# Use single quotes in PowerShell so the JSON stays intact.
-./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest -IngestKeysJson '{"travel":"dev-secret-123"}'
+# Clean setup: one ingest key per product.
+./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest -IngestKeyTravel "dev-secret-123"
+
+# Optional: override the demo speedboat key (defaults to -IngestKeyTravel)
+# ./deploy.ps1 ... -IngestKeyTravel "dev-secret-123" -SpeedboatIngestApiKey "dev-secret-123"
 ```
 
 After deploy, the script prints:
@@ -104,7 +106,7 @@ Networking:
 ### Home Core (service)
 Environment variables (defaults in parentheses):
 - `REDIS_URL` (`redis://localhost:6379`)
-- `INGEST_KEYS_JSON` (`{ "travel": "dev-secret-123" }`)
+- `INGEST_KEY_TRAVEL` (`dev-secret-123`)
 - `MAX_INGEST_PAYLOAD_BYTES` (`65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (`120`)
 - `WIDGET_SOFT_TTL_SECONDS` (`60`)

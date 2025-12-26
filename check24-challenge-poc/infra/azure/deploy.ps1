@@ -13,7 +13,7 @@ param(
   [string]$ImageTag = "latest",
 
   [Parameter(Mandatory = $false)]
-  [string]$IngestKeysJson = '{"travel":"dev-secret-123"}',
+  [string]$IngestKeyTravel = "dev-secret-123",
 
   [Parameter(Mandatory = $false)]
   [string]$SpeedboatIngestApiKey = ""
@@ -46,24 +46,12 @@ az group create --name $ResourceGroupName --location $Location | Out-Null
 # Deploy infra
 $deploymentName = "home-core-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 
-# Derive speedboat key from ingestKeysJson if not provided
+# Use the same per-product ingest key for the demo speedboat unless overridden.
 if ([string]::IsNullOrWhiteSpace($SpeedboatIngestApiKey)) {
-  try {
-    $keysObj = $IngestKeysJson | ConvertFrom-Json
-    if ($null -ne $keysObj.travel -and -not [string]::IsNullOrWhiteSpace([string]$keysObj.travel)) {
-      $SpeedboatIngestApiKey = [string]$keysObj.travel
-    }
-  }
-  catch {
-    # ignore
-  }
-}
-if ([string]::IsNullOrWhiteSpace($SpeedboatIngestApiKey)) {
-  $SpeedboatIngestApiKey = "dev-secret-123"
+  $SpeedboatIngestApiKey = $IngestKeyTravel
 }
 
-# IMPORTANT: Passing JSON strings as inline CLI args is brittle on PowerShell/Windows.
-# Use an ARM parameters file to preserve quoting (prevents INGEST_KEYS_JSON from becoming invalid).
+# Use an ARM parameters file to keep quoting stable across shells.
 $paramsFile = Join-Path $env:TEMP ("home-core-params-" + $deploymentName + ".json")
 $params = @{
   '`$schema'      = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -72,7 +60,7 @@ $params = @{
     location             = @{ value = $Location }
     namePrefix           = @{ value = $NamePrefix }
     imageTag             = @{ value = $ImageTag }
-    ingestKeysJson        = @{ value = $IngestKeysJson }
+    ingestKeyTravel       = @{ value = $IngestKeyTravel }
     speedboatIngestApiKey = @{ value = $SpeedboatIngestApiKey }
   }
 }

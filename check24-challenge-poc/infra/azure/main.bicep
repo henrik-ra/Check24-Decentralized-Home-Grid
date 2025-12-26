@@ -11,13 +11,15 @@ param namePrefix string = 'c24'
 @description('Container image tag to deploy (e.g. "latest" or a git sha).')
 param imageTag string = 'latest'
 
-@description('Secure JSON string mapping productId -> ingest key (e.g. {"travel":"dev-secret-123"}).')
+@description('Ingest API key for the travel product. The home-core expects this as env var INGEST_KEY_TRAVEL.')
 @secure()
-param ingestKeysJson string
+param ingestKeyTravel string
 
-@description('Ingest API key used by the speedboat-travel producer (should match ingestKeysJson["travel"]).')
+@description('Ingest API key used by the speedboat-travel producer (should match ingestKeyTravel).')
 @secure()
 param speedboatIngestApiKey string = ''
+
+var effectiveSpeedboatIngestApiKey = empty(speedboatIngestApiKey) ? ingestKeyTravel : speedboatIngestApiKey
 
 @description('CPU cores for the container app.')
 param containerCpu string = '0.5'
@@ -174,8 +176,8 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
         value: redisUrl
       }
       {
-        name: 'ingest-keys-json'
-        value: ingestKeysJson
+        name: 'ingest-key-travel'
+        value: ingestKeyTravel
       }
     ]
 
@@ -209,8 +211,8 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
             secretRef: 'redis-url'
           }
           {
-            name: 'INGEST_KEYS_JSON'
-            secretRef: 'ingest-keys-json'
+            name: 'INGEST_KEY_TRAVEL'
+            secretRef: 'ingest-key-travel'
           }
         ]
       }
@@ -243,7 +245,7 @@ module speedboatContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
       }
       {
         name: 'ingest-api-key'
-        value: speedboatIngestApiKey
+        value: effectiveSpeedboatIngestApiKey
       }
     ]
 
