@@ -1,5 +1,6 @@
 import type { HomeWidget, SduiComponent } from '../types';
 import { HeroBanner } from './HeroBanner';
+import { TextCard } from './TextCard';
 
 type Props = {
   widgets: HomeWidget[];
@@ -9,6 +10,8 @@ function renderComponent(component: SduiComponent) {
   switch (component.type) {
     case 'HeroBanner':
       return <HeroBanner key={component.type + JSON.stringify(component.props ?? {})} component={component} />;
+    case 'TextCard':
+      return <TextCard key={component.type + JSON.stringify(component.props ?? {})} component={component} />;
     default:
       return null;
   }

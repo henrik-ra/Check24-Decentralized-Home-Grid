@@ -32,6 +32,14 @@ async function pushUpdateForUser(userId) {
 						cta: { label: 'Ansehen', deeplink: 'check24://travel/offer/123' },
 					},
 				},
+				{
+					type: 'TextCard',
+					props: {
+						label: 'Personalized hint',
+						title: 'Warum gerade dieses Angebot?',
+						text: `Basierend auf deinem Verhalten zeigen wir dir gerade Reise-Deals um ${price} €.`,
+					},
+				},
 			],
 			data: {
 				price: `${price} €`,
