@@ -261,8 +261,10 @@ module speedboatContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
     location: location
     environmentResourceId: managedEnvironment.outputs.resourceId
 
-    // This is a background job; no ingress needed.
-    disableIngress: true
+    // Enable ingress for simulation endpoint
+    ingressExternal: true
+    ingressTargetPort: 3000
+    ingressTransport: 'auto'
 
     scaleSettings: {
       minReplicas: 1
@@ -334,6 +336,9 @@ output containerAppUrl string = 'https://${containerApp.outputs.fqdn}'
 
 @description('Speedboat-travel Container App name.')
 output speedboatContainerAppName string = speedboatContainerApp.outputs.name
+
+@description('Speedboat-travel public URL.')
+output speedboatUrl string = 'https://${speedboatContainerApp.outputs.fqdn}'
 
 @description('ACR name.')
 output acrName string = acr.outputs.name

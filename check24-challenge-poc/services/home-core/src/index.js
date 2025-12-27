@@ -14,12 +14,23 @@ function normalizeProductIdToEnvSuffix(productId) {
 
 const DEFAULT_INGEST_KEYS_BY_SUFFIX = {
 	TRAVEL: 'dev-secret-123',
+	DSL: 'dev-secret-123',
+	INSURANCE: 'dev-secret-123',
+	ENERGY: 'dev-secret-123',
+	FINANCE: 'dev-secret-123',
+	SHOPPING: 'dev-secret-123',
 };
 
 function getIngestKeyForProduct(productId) {
 	const suffix = normalizeProductIdToEnvSuffix(productId);
 	if (!suffix) return undefined;
-	return process.env[`INGEST_KEY_${suffix}`] || DEFAULT_INGEST_KEYS_BY_SUFFIX[suffix];
+	// Debug logging for troubleshooting
+	const envKey = process.env[`INGEST_KEY_${suffix}`];
+	const defaultKey = DEFAULT_INGEST_KEYS_BY_SUFFIX[suffix];
+	if (!envKey && !defaultKey) {
+		console.warn(`No ingest key found for product ${productId} (suffix: ${suffix})`);
+	}
+	return envKey || defaultKey;
 }
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -353,6 +364,7 @@ fastify.post(
 		const expectedKey = productId ? String(getIngestKeyForProduct(productId) || '').trim() : '';
 
 		if (!productId || !apiKey || !expectedKey || expectedKey !== apiKey) {
+			request.log.warn({ productId, hasApiKey: !!apiKey, expectedKeyFound: !!expectedKey, match: expectedKey === apiKey }, 'Ingest Forbidden');
 			return reply.status(403).send({ error: 'Forbidden' });
 		}
 

@@ -6,6 +6,10 @@ export function getApiBaseUrl(): string {
   return import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL;
 }
 
+export function getSpeedboatUrl(): string {
+  return import.meta.env.VITE_SPEEDBOAT_URL ?? 'http://localhost:3001';
+}
+
 export type AuthResponse = {
   token: string;
   user: {
@@ -51,4 +55,20 @@ export async function fetchHome(token: string): Promise<HomeResponse> {
   }
 
   return response.json() as Promise<HomeResponse>;
+}
+
+export async function simulateTravelInterest(email: string): Promise<void> {
+  return simulateInterest(email, 'travel');
+}
+
+export async function simulateInterest(email: string, vertical: string): Promise<void> {
+  const response = await fetch(`${getSpeedboatUrl()}/api/simulate/interest`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, vertical }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Simulation failed: ${response.status}`);
+  }
 }

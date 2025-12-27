@@ -106,6 +106,7 @@ $acrLoginServer = az deployment group show --name $deploymentName --resource-gro
 $containerAppName = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.containerAppName.value" -o tsv
 $containerAppUrl = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.containerAppUrl.value" -o tsv
 $speedboatAppName = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.speedboatContainerAppName.value" -o tsv
+$speedboatUrl = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.speedboatUrl.value" -o tsv
 $frontendStorageAccountName = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.frontendStorageAccountName.value" -o tsv
 
 if ([string]::IsNullOrWhiteSpace($acrName) -or [string]::IsNullOrWhiteSpace($acrLoginServer) -or [string]::IsNullOrWhiteSpace($containerAppName)) {
@@ -173,10 +174,11 @@ if ([string]::IsNullOrWhiteSpace($frontendUrl)) {
 
 Write-Host "Frontend URL: $frontendUrl"
 
-Write-Host "Building frontend (Vite) with VITE_API_BASE_URL=$containerAppUrl"
+Write-Host "Building frontend (Vite) with VITE_API_BASE_URL=$containerAppUrl and VITE_SPEEDBOAT_URL=$speedboatUrl"
 Push-Location $frontendPath
 try {
   $env:VITE_API_BASE_URL = $containerAppUrl
+  $env:VITE_SPEEDBOAT_URL = $speedboatUrl
   npm install | Out-Null
   npm run build | Out-Null
 }
