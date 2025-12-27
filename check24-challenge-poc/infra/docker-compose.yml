@@ -15,6 +15,9 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       INGEST_KEY_TRAVEL: dev-secret-123
+      MONGODB_URI: ${MONGODB_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       REDIS_READ_TIMEOUT_MS: "40"
       LKG_TTL_MS: "300000"
       LKG_MAX_ENTRIES: "5000"
@@ -31,6 +34,7 @@ services:
       CORE_URL: http://home-core:3000
       PRODUCT_ID: travel
       INGEST_API_KEY: dev-secret-123
+      USER_IDS: demo@example.com
     depends_on:
       - home-core
     restart: unless-stopped

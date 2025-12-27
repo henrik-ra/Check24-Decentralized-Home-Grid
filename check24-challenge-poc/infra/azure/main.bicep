@@ -19,6 +19,17 @@ param ingestKeyTravel string
 @secure()
 param speedboatIngestApiKey string = ''
 
+@description('MongoDB connection string (MongoDB Atlas) for user identity. If empty, auth endpoints are disabled.')
+@secure()
+param mongoDbUri string
+
+@description('JWT signing secret. If empty, auth endpoints are disabled.')
+@secure()
+param jwtSecret string
+
+@description('Demo user id for the speedboat producer (should match the user id used by auth; this PoC uses email as user id).')
+param demoUserId string = 'demo@example.com'
+
 var effectiveSpeedboatIngestApiKey = empty(speedboatIngestApiKey) ? ingestKeyTravel : speedboatIngestApiKey
 
 @description('CPU cores for the container app.')
@@ -179,6 +190,14 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
         name: 'ingest-key-travel'
         value: ingestKeyTravel
       }
+      {
+        name: 'mongodb-uri'
+        value: mongoDbUri
+      }
+      {
+        name: 'jwt-secret'
+        value: jwtSecret
+      }
     ]
 
     registries: [
@@ -213,6 +232,18 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
           {
             name: 'INGEST_KEY_TRAVEL'
             secretRef: 'ingest-key-travel'
+          }
+          {
+            name: 'MONGODB_URI'
+            secretRef: 'mongodb-uri'
+          }
+          {
+            name: 'JWT_SECRET'
+            secretRef: 'jwt-secret'
+          }
+          {
+            name: 'JWT_EXPIRES_IN'
+            value: '7d'
           }
         ]
       }
@@ -280,7 +311,7 @@ module speedboatContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
           }
           {
             name: 'USER_IDS'
-            value: '1,2'
+            value: demoUserId
           }
           {
             name: 'PUSH_INTERVAL_MS'

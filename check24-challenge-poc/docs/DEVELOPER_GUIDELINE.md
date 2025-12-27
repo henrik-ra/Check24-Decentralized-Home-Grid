@@ -54,8 +54,10 @@ Products push one widget snapshot per request.
 ### Read path: `GET /api/home`
 Clients request the full widget list for a user.
 
-**Header (PoC)**
-- `x-user-id`: user identifier (e.g. `1`)
+**Required: JWT**
+- `Authorization: Bearer <token>`
+
+The Home Core uses the JWT `sub` claim as the user id.
 
 **Response**
 Returns `widgets[]` already sorted by priority.
@@ -72,6 +74,12 @@ Returns `widgets[]` already sorted by priority.
 ### Home Core environment variables
 - `REDIS_URL` (default: `redis://localhost:6379`)
 - `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
+
+Optional auth (MongoDB + JWT):
+- `MONGODB_URI` (unset -> auth endpoints disabled)
+- `MONGODB_DB` (default: `check24-home`)
+- `JWT_SECRET` (unset -> auth endpoints disabled)
+- `JWT_EXPIRES_IN` (default: `7d`)
 
 Ingest auth keys follow the pattern `INGEST_KEY_<PRODUCT_ID_UPPER_SNAKE>`.
 Example: `x-product-id: travel` -> `INGEST_KEY_TRAVEL`.
@@ -120,6 +128,22 @@ Start Speedboat:
 - `npm start`
 
 ## Example requests
+
+### PowerShell: Register + use JWT for /api/home
+```powershell
+# Requires MONGODB_URI + JWT_SECRET to be set on the home-core
+
+$register = Invoke-RestMethod -Method Post `
+	-Uri "http://localhost:3000/api/auth/register" `
+	-ContentType "application/json" `
+	-Body (@{ email = "user@example.com"; password = "secret123" } | ConvertTo-Json)
+
+$token = $register.token
+
+Invoke-RestMethod `
+	-Uri "http://localhost:3000/api/home" `
+	-Headers @{ Authorization = "Bearer $token" }
+```
 
 ### PowerShell: Ingest a snapshot
 ```powershell

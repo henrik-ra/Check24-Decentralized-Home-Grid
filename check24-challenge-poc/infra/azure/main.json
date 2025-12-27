@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.36.1.42791",
-      "templateHash": "385160178395872244"
+      "templateHash": "14791332601343440063"
     }
   },
   "parameters": {
@@ -44,6 +44,25 @@
       "defaultValue": "",
       "metadata": {
         "description": "Ingest API key used by the speedboat-travel producer (should match ingestKeyTravel)."
+      }
+    },
+    "mongoDbUri": {
+      "type": "securestring",
+      "metadata": {
+        "description": "MongoDB connection string (MongoDB Atlas) for user identity. If empty, auth endpoints are disabled."
+      }
+    },
+    "jwtSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "JWT signing secret. If empty, auth endpoints are disabled."
+      }
+    },
+    "demoUserId": {
+      "type": "string",
+      "defaultValue": "demo@example.com",
+      "metadata": {
+        "description": "Demo user id for the speedboat producer (should match the user id used by auth; this PoC uses email as user id)."
       }
     },
     "containerCpu": {
@@ -6961,6 +6980,14 @@
               {
                 "name": "ingest-key-travel",
                 "value": "[parameters('ingestKeyTravel')]"
+              },
+              {
+                "name": "mongodb-uri",
+                "value": "[parameters('mongoDbUri')]"
+              },
+              {
+                "name": "jwt-secret",
+                "value": "[parameters('jwtSecret')]"
               }
             ]
           },
@@ -6998,6 +7025,18 @@
                   {
                     "name": "INGEST_KEY_TRAVEL",
                     "secretRef": "ingest-key-travel"
+                  },
+                  {
+                    "name": "MONGODB_URI",
+                    "secretRef": "mongodb-uri"
+                  },
+                  {
+                    "name": "JWT_SECRET",
+                    "secretRef": "jwt-secret"
+                  },
+                  {
+                    "name": "JWT_EXPIRES_IN",
+                    "value": "7d"
                   }
                 ]
               }
@@ -8655,7 +8694,7 @@
                   },
                   {
                     "name": "USER_IDS",
-                    "value": "1,2"
+                    "value": "[parameters('demoUserId')]"
                   },
                   {
                     "name": "PUSH_INTERVAL_MS",

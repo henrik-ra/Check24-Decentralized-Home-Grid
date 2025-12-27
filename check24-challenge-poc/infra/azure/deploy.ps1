@@ -16,20 +16,29 @@ param(
   [string]$IngestKeyTravel = "dev-secret-123",
 
   [Parameter(Mandatory = $false)]
-  [string]$SpeedboatIngestApiKey = ""
+  [string]$SpeedboatIngestApiKey = "",
+
+  [Parameter(Mandatory = $false)]
+  [string]$MongoDbUri = "",
+
+  [Parameter(Mandatory = $false)]
+  [string]$JwtSecret = "",
+
+  [Parameter(Mandatory = $false)]
+  [string]$DemoUserId = "demo@example.com"
 )
 
 $ErrorActionPreference = "Stop"
 
-function Require-Command {
+function Assert-Command {
   param([string]$Name)
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
     throw "Required command '$Name' not found. Install it and try again."
   }
 }
 
-Require-Command "az"
-Require-Command "npm"
+Assert-Command "az"
+Assert-Command "npm"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path
 $bicepPath = (Join-Path $PSScriptRoot "main.bicep")
@@ -45,6 +54,21 @@ az group create --name $ResourceGroupName --location $Location | Out-Null
 
 # Deploy infra
 $deploymentName = "home-core-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+
+# Prefer environment variables for secrets to avoid leaking them in shell history.
+if ([string]::IsNullOrWhiteSpace($MongoDbUri)) {
+  $MongoDbUri = $env:MONGODB_URI
+}
+if ([string]::IsNullOrWhiteSpace($JwtSecret)) {
+  $JwtSecret = $env:JWT_SECRET
+}
+
+if ([string]::IsNullOrWhiteSpace($MongoDbUri)) {
+  throw "Missing MongoDB connection string. Provide -MongoDbUri or set env var MONGODB_URI."
+}
+if ([string]::IsNullOrWhiteSpace($JwtSecret)) {
+  throw "Missing JWT secret. Provide -JwtSecret or set env var JWT_SECRET."
+}
 
 # Use the same per-product ingest key for the demo speedboat unless overridden.
 if ([string]::IsNullOrWhiteSpace($SpeedboatIngestApiKey)) {
@@ -62,6 +86,9 @@ $params = @{
     imageTag             = @{ value = $ImageTag }
     ingestKeyTravel       = @{ value = $IngestKeyTravel }
     speedboatIngestApiKey = @{ value = $SpeedboatIngestApiKey }
+    mongoDbUri            = @{ value = $MongoDbUri }
+    jwtSecret             = @{ value = $JwtSecret }
+    demoUserId             = @{ value = $DemoUserId }
   }
 }
 

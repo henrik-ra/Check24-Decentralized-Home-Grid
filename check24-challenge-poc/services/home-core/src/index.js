@@ -1,5 +1,8 @@
 const cors = require('@fastify/cors');
+const fastifyJwt = require('@fastify/jwt');
 const fastifyFactory = require('fastify');
+const bcrypt = require('bcryptjs');
+const { MongoClient } = require('mongodb');
 const { createClient } = require('redis');
 
 function normalizeProductIdToEnvSuffix(productId) {
@@ -20,6 +23,17 @@ function getIngestKeyForProduct(productId) {
 }
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+
+// Auth/identity (control plane)
+// This PoC runs in "auth-required" mode: /api/home requires a JWT.
+// Configure with MONGODB_URI + JWT_SECRET.
+const mongoDbUri = process.env.MONGODB_URI || '';
+const mongoDbName = process.env.MONGODB_DB || 'check24-home';
+const jwtSecret = process.env.JWT_SECRET || '';
+const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '7d';
+
+let mongoClient;
+let usersCollection;
 
 // IMPORTANT: Ingest auth is configured per product via env vars:
 // - INGEST_KEY_TRAVEL
@@ -54,9 +68,122 @@ fastify.register(cors, {
 	origin: true,
 });
 
+fastify.register(fastifyJwt, {
+	secret: jwtSecret,
+	sign: { expiresIn: jwtExpiresIn },
+});
+
 fastify.get('/health', async () => {
 	return { ok: true };
 });
+
+function getBearerToken(request) {
+	const header = String(request.headers['authorization'] || '').trim();
+	if (!header) return undefined;
+	const match = header.match(/^Bearer\s+(.+)$/i);
+	return match ? match[1].trim() : undefined;
+}
+
+async function resolveUserIdOrThrow(request, reply) {
+	const bearerToken = getBearerToken(request);
+	if (!bearerToken) {
+		reply.status(401).send({ error: 'Unauthorized' });
+		return undefined;
+	}
+
+	try {
+		const payload = await fastify.jwt.verify(bearerToken);
+		const sub = String(payload?.sub || '').trim();
+		if (!sub) {
+			reply.status(401).send({ error: 'Unauthorized' });
+			return undefined;
+		}
+		return sub;
+	} catch {
+		reply.status(401).send({ error: 'Unauthorized' });
+		return undefined;
+	}
+}
+
+const authBodySchema = {
+	type: 'object',
+	required: ['email', 'password'],
+	additionalProperties: false,
+	properties: {
+		email: { type: 'string', minLength: 3, maxLength: 254 },
+		password: { type: 'string', minLength: 6, maxLength: 200 },
+	},
+};
+
+fastify.post(
+	'/api/auth/register',
+	{
+		schema: { body: authBodySchema },
+	},
+	async (request, reply) => {
+		if (!usersCollection || !fastify.jwt) {
+			return reply.status(503).send({ error: 'Auth unavailable' });
+		}
+
+		const email = String(request.body.email || '').trim().toLowerCase();
+		const password = String(request.body.password || '');
+		if (!email || !password) {
+			return reply.status(400).send({ error: 'Invalid payload' });
+		}
+
+		const passwordHash = await bcrypt.hash(password, 10);
+		try {
+			const insertResult = await usersCollection.insertOne({
+				email,
+				passwordHash,
+				createdAt: new Date(),
+			});
+			const token = fastify.jwt.sign({ sub: email });
+			return reply.send({ token, user: { id: email, email } });
+		} catch (error) {
+			if (error && error.code === 11000) {
+				return reply.status(409).send({ error: 'Email already registered' });
+			}
+			request.log.error({ error }, 'Failed to register user');
+			return reply.status(500).send({ error: 'Auth failure' });
+		}
+	}
+);
+
+fastify.post(
+	'/api/auth/login',
+	{
+		schema: { body: authBodySchema },
+	},
+	async (request, reply) => {
+		if (!usersCollection || !fastify.jwt) {
+			return reply.status(503).send({ error: 'Auth unavailable' });
+		}
+
+		const email = String(request.body.email || '').trim().toLowerCase();
+		const password = String(request.body.password || '');
+		if (!email || !password) {
+			return reply.status(400).send({ error: 'Invalid payload' });
+		}
+
+		try {
+			const user = await usersCollection.findOne({ email });
+			if (!user) {
+				return reply.status(401).send({ error: 'Invalid credentials' });
+			}
+			const ok = await bcrypt.compare(password, String(user.passwordHash || ''));
+			if (!ok) {
+				return reply.status(401).send({ error: 'Invalid credentials' });
+			}
+
+			const token = fastify.jwt.sign({ sub: email });
+			return reply.send({ token, user: { id: email, email } });
+		} catch (error) {
+			request.log.error({ error }, 'Failed to login user');
+			return reply.status(500).send({ error: 'Auth failure' });
+		}
+	}
+);
 
 function nowIso() {
 	return new Date().toISOString();
@@ -299,7 +426,8 @@ fastify.post(
 );
 
 fastify.get('/api/home', async (request, reply) => {
-	const userId = String(getHeader(request, 'x-user-id') || 'anon').trim();
+	const userId = await resolveUserIdOrThrow(request, reply);
+	if (!userId) return;
 	const userIndexKey = buildUserIndexKey(userId);
 
 	try {
@@ -365,13 +493,32 @@ fastify.get('/api/home', async (request, reply) => {
 });
 
 async function start() {
+	if (!mongoDbUri) {
+		throw new Error('Missing required env var MONGODB_URI');
+	}
+	if (!jwtSecret) {
+		throw new Error('Missing required env var JWT_SECRET');
+	}
+
 	await redis.connect();
+
+	mongoClient = new MongoClient(mongoDbUri);
+	await mongoClient.connect();
+	const db = mongoClient.db(mongoDbName);
+	usersCollection = db.collection('users');
+	await usersCollection.createIndex({ email: 1 }, { unique: true });
+	fastify.log.info({ mongoDbName }, 'MongoDB connected');
 	const port = Number.parseInt(process.env.PORT || '3000', 10);
 	const host = process.env.HOST || '0.0.0.0';
 
 	fastify.addHook('onClose', async () => {
 		try {
 			await redis.quit();
+		} catch {
+			// ignore
+		}
+		try {
+			await mongoClient?.close();
 		} catch {
 			// ignore
 		}

@@ -74,7 +74,7 @@ Deploy:
 cd infra/azure
 
 # Clean setup: one ingest key per product.
-./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest -IngestKeyTravel "dev-secret-123"
+./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest -IngestKeyTravel "dev-secret-123" -MongoDbUri "<your-atlas-uri>" -JwtSecret "<strong-secret>" -DemoUserId "demo@example.com"
 
 # Optional: override the demo speedboat key (defaults to -IngestKeyTravel)
 # ./deploy.ps1 ... -IngestKeyTravel "dev-secret-123" -SpeedboatIngestApiKey "dev-secret-123"
@@ -107,6 +107,9 @@ Networking:
 Environment variables (defaults in parentheses):
 - `REDIS_URL` (`redis://localhost:6379`)
 - `INGEST_KEY_TRAVEL` (`dev-secret-123`)
+- `MONGODB_URI` (unset -> auth disabled)
+- `JWT_SECRET` (unset -> auth disabled)
+- `JWT_EXPIRES_IN` (`7d`)
 - `MAX_INGEST_PAYLOAD_BYTES` (`65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (`120`)
 - `WIDGET_SOFT_TTL_SECONDS` (`60`)
@@ -116,6 +119,17 @@ Environment variables (defaults in parentheses):
 - `REDIS_READ_TIMEOUT_MS` (`40`)
 - `LKG_TTL_MS` (`300000`)
 - `LKG_MAX_ENTRIES` (`5000`)
+
+## Minimal Auth (MongoDB + JWT)
+
+Home Core exposes:
+- `POST /api/auth/register` -> `{ token, user }`
+- `POST /api/auth/login` -> `{ token, user }`
+
+`GET /api/home` requires:
+- `Authorization: Bearer <token>`
+
+Demo note: the bundled `speedboat-travel` writes widgets for `DemoUserId`.
 
 ## Documentation
 
