@@ -176,6 +176,22 @@ private fun WidgetCard(widget: HomeWidget) {
 
       widget.components.forEach { component ->
         when (component.type) {
+          "CompactRow" -> {
+            val title = component.props?.get("title") as? String
+            val subtitle = component.props?.get("subtitle") as? String
+            val price = component.props?.get("price") as? String
+
+            if (title != null) {
+              Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
+            if (subtitle != null) {
+              Text(text = subtitle, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (price != null) {
+              Text(text = price, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            }
+          }
+
           "HeroBanner" -> {
             val title = component.props?.get("title") as? String
             val subtitle = component.props?.get("subtitle") as? String

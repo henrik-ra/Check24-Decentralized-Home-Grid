@@ -11,6 +11,7 @@ export type HomeWidget = {
   priority: number;
   components: SduiComponent[];
   data: Record<string, unknown>;
+  meta?: Record<string, unknown>;
   softExpiresAt: string;
   hardExpiresAt: string;
   generatedAt: string;

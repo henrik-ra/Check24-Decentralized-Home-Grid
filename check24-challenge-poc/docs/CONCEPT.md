@@ -13,7 +13,9 @@ This document describes the current Proof of Concept implementation for a person
 **Components**
 - **Home Core**: API service providing
 	- `POST /api/ingest` (write path for product teams)
+	- `POST /api/signals` (write path for lightweight interest signals)
 	- `GET /api/home` (read path for clients)
+	- `POST /api/auth/register`, `POST /api/auth/login` (JWT issuance for clients)
 - **Redis**: Snapshot store for widget payloads + per-user index + idempotency + rate limit counters.
 - **Speedboats (product services)**: Push snapshots periodically or event-driven.
 - **Clients**: Web (React) and Android (Compose) render the same SDUI payload.
@@ -33,17 +35,23 @@ This document describes the current Proof of Concept implementation for a person
 5. Home Core updates a per-user index set so the read path can resolve all widget keys efficiently.
 
 ### Read path (client → Home Core)
-1. Client calls `GET /api/home` with header `x-user-id`.
+1. Client calls `GET /api/home` with `Authorization: Bearer <JWT>`.
+	- PoC fallback (optional): if `ALLOW_X_USER_ID=true`, clients may send `x-user-id` instead.
 2. Home Core reads the per-user index set from Redis (**tight timeout / fail-fast**).
 3. Home Core uses a single `MGET` to load all snapshot payloads (**tight timeout / fail-fast**).
 4. Missing/expired payloads are removed from the index.
 5. Response is sorted by priority and returned.
 
+**Baseline-on-read (minimum content)**
+- If a user has no pushed widgets yet, Home Core fills the response with **at least 3 baseline widgets**.
+- These baseline widgets are **Home-owned** (generated at read-time), so they do not require pushing to all users.
+- Personalized widgets always outrank baseline due to higher priority and/or affinity boosts.
+
 **Read-path resilience (PoC)**
 - `GET /api/home` is designed to be **always available**:
 	- If Redis is unavailable, Home Core returns `200` with a degraded response.
 	- Home Core keeps a small **in-memory Last Known Good (LKG)** response per user (best-effort, per instance) and serves it during short Redis outages.
-	- If no LKG exists, Home Core returns a minimal empty response (`widgets: []`).
+	- If no LKG exists, Home Core returns a baseline-filled response (minimum 3 widgets).
 
 This keeps the Home endpoint up during dependency outages without ever calling product backends.
 
@@ -54,6 +62,8 @@ This PoC uses simple key patterns:
 	- `widget:{userId}:{productId}:{widgetId}` → JSON payload
 - Per-user index key:
 	- `user:{userId}:widgets` → Redis Set containing snapshot keys for that user
+- Affinity scores (personalization):
+	- `affinity:{userId}` → Redis Hash mapping `{ productId → score }`
 - Idempotency key:
 	- `idempo:{productId}:{idempotencyKey}` → `"1"` with TTL
 - Rate limit counter:
@@ -119,9 +129,10 @@ Net effect:
 - **Product down**: No impact to read path. Widgets slowly expire.
 - **Redis down**:
 	- `POST /api/ingest` returns `500 Storage Failure`
+	- `POST /api/signals` returns `500 Signal Failure`
 	- `GET /api/home` returns `200` and degrades gracefully:
 		- Prefer in-memory LKG (`meta.degraded=true`, `meta.source=lkg`)
-		- Otherwise empty widgets (`widgets: []`, `meta.degraded=true`, `meta.source=empty`)
+		- Otherwise baseline widgets (`meta.degraded=true`, `meta.source=empty`)
 - **Bad payload**: Ingest returns `400` (schema validation).
 - **Expired/missing widget keys**: Removed from the per-user index automatically during reads.
 
@@ -140,6 +151,8 @@ This PoC is intentionally simple, but the pattern scales:
 
 Home Core reads configuration from environment variables:
 - `REDIS_URL` (default: `redis://localhost:6379`)
+- `MONGODB_URI` (required for auth)
+- `JWT_SECRET` (required for auth)
 - `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
 - `MAX_INGEST_PAYLOAD_BYTES` (default: `65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (default: `120`)
@@ -147,6 +160,7 @@ Home Core reads configuration from environment variables:
 - `WIDGET_HARD_TTL_SECONDS` (default: `3600`)
 - `INDEX_TTL_SECONDS` (default: `604800`)
 - `IDEMPOTENCY_TTL_SECONDS` (default: `300`)
+- `MIN_WIDGETS` (default: `3`) – minimum widgets returned on reads
 
 Read-path resilience (PoC):
 - `REDIS_READ_TIMEOUT_MS` (default: `40`) – per Redis read operation timeout budget

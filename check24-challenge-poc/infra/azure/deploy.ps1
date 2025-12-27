@@ -129,12 +129,41 @@ az acr build --registry $acrName --image "home-core:$ImageTag" $homeCorePath | O
 Write-Host "Building (ACR build): $speedboatImageRef"
 az acr build --registry $acrName --image "speedboat-travel:$ImageTag" $speedboatPath | Out-Null
 
+# IMPORTANT:
+# Azure Container Apps can keep serving an older image when using a mutable tag like "latest".
+# To avoid stale deployments, resolve the tag to the *current digest* and deploy the pinned digest.
+function Resolve-AcrDigest {
+  param(
+    [Parameter(Mandatory = $true)][string]$RegistryName,
+    [Parameter(Mandatory = $true)][string]$Repository,
+    [Parameter(Mandatory = $true)][string]$Tag
+  )
+
+  $manifests = az acr repository show-manifests -n $RegistryName --repository $Repository --top 20 --orderby time_desc -o json | ConvertFrom-Json
+  if (-not $manifests) {
+    throw "Could not list manifests for $Repository in $RegistryName"
+  }
+
+  $match = $manifests | Where-Object { $_.tags -and ($_.tags -contains $Tag) } | Select-Object -First 1
+  if (-not $match -or [string]::IsNullOrWhiteSpace($match.digest)) {
+    throw "Could not resolve digest for ${Repository}:${Tag} in ${RegistryName}"
+  }
+
+  return [string]$match.digest
+}
+
+$homeDigest = Resolve-AcrDigest -RegistryName $acrName -Repository 'home-core' -Tag $ImageTag
+$speedboatDigest = Resolve-AcrDigest -RegistryName $acrName -Repository 'speedboat-travel' -Tag $ImageTag
+
+$homeImageRefPinned = "$acrLoginServer/home-core@$homeDigest"
+$speedboatImageRefPinned = "$acrLoginServer/speedboat-travel@$speedboatDigest"
+
 # Trigger container app to use the image/tag and force a new revision
 $deployToken = (Get-Date).ToString('yyyyMMdd-HHmmss')
-az containerapp update --name $containerAppName --resource-group $ResourceGroupName --image $homeImageRef --set-env-vars "DEPLOYMENT_TOKEN=$deployToken" | Out-Null
+az containerapp update --name $containerAppName --resource-group $ResourceGroupName --image $homeImageRefPinned --set-env-vars "DEPLOYMENT_TOKEN=$deployToken" | Out-Null
 
 if (-not [string]::IsNullOrWhiteSpace($speedboatAppName)) {
-  az containerapp update --name $speedboatAppName --resource-group $ResourceGroupName --image $speedboatImageRef --set-env-vars "DEPLOYMENT_TOKEN=$deployToken" | Out-Null
+  az containerapp update --name $speedboatAppName --resource-group $ResourceGroupName --image $speedboatImageRefPinned --set-env-vars "DEPLOYMENT_TOKEN=$deployToken" | Out-Null
 }
 
 Write-Host "Deployed backend URL: $containerAppUrl"

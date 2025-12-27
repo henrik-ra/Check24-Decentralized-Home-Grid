@@ -98,6 +98,10 @@ function getBearerToken(request) {
 async function resolveUserIdOrThrow(request, reply) {
 	const bearerToken = getBearerToken(request);
 	if (!bearerToken) {
+		if (String(process.env.ALLOW_X_USER_ID || '').toLowerCase() === 'true') {
+			const userIdHeader = String(request.headers['x-user-id'] || '').trim();
+			if (userIdHeader) return userIdHeader;
+		}
 		reply.status(401).send({ error: 'Unauthorized' });
 		return undefined;
 	}
@@ -271,6 +275,10 @@ function buildUserIndexKey(userId) {
 	return `user:${userId}:widgets`;
 }
 
+function buildUserProductLatestWidgetKey(userId, productId) {
+	return `user:${userId}:product:${productId}:latestWidgetKey`;
+}
+
 function buildIdempotencyKey(productId, idempotencyKey) {
 	return `idempo:${productId}:${idempotencyKey}`;
 }
@@ -288,15 +296,164 @@ function assertFinitePositiveInt(value, fallback) {
 	return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+const minWidgets = Number.parseInt(process.env.MIN_WIDGETS || '3', 10);
+
 function buildEmptyHomeResponse({ degraded, reason }) {
+	const widgets = ensureMinWidgets([], assertFinitePositiveInt(minWidgets, 3));
 	return {
 		schemaVersion: '1.0',
 		generatedAt: nowIso(),
 		greeting: 'Willkommen',
-		widgets: [],
+		widgets,
 		...(degraded ? { meta: { degraded: true, reason: reason || 'unavailable', source: 'empty' } } : {}),
 	};
 }
+
+function buildBaselineWidgets() {
+	// Home-owned baseline widgets (neutral, non-personalized)
+	// Purpose: guarantee minimum content without pushing to all users.
+	const productId = 'BASELINE';
+	const generatedAt = nowIso();
+	const softExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(widgetSoftTtlSeconds, 60));
+	const hardExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(widgetHardTtlSeconds, 3600));
+
+	return [
+		{
+			schemaVersion: '1.0',
+			widgetId: 'baseline.travel.v1',
+			productId,
+			type: 'compact_row',
+			priority: 30,
+			components: [
+				{
+					type: 'CompactRow',
+					props: {
+						title: 'Urlaub finden',
+						subtitle: 'Top Pauschalreisen entdecken',
+						imageUrl: 'https://via.placeholder.com/80/00b4db/ffffff?text=travel',
+						price: 'Top Deals',
+						cta: { label: 'Ansehen', action: 'deeplink', deeplink: 'check24://travel/offer/123' },
+					},
+				},
+			],
+			data: { baseline: true },
+			softExpiresAt,
+			hardExpiresAt,
+			generatedAt,
+			meta: { isBaseline: true },
+		},
+		{
+			schemaVersion: '1.0',
+			widgetId: 'baseline.dsl.v1',
+			productId,
+			type: 'compact_row',
+			priority: 20,
+			components: [
+				{
+					type: 'CompactRow',
+					props: {
+						title: 'Internet vergleichen',
+						subtitle: 'Tarife für Zuhause prüfen',
+						imageUrl: 'https://via.placeholder.com/80/663399/ffffff?text=dsl',
+						price: 'Schnell & günstig',
+						cta: { label: 'Vergleichen', action: 'deeplink', deeplink: 'check24://dsl/offer/123' },
+					},
+				},
+			],
+			data: { baseline: true },
+			softExpiresAt,
+			hardExpiresAt,
+			generatedAt,
+			meta: { isBaseline: true },
+		},
+		{
+			schemaVersion: '1.0',
+			widgetId: 'baseline.insurance.v1',
+			productId,
+			type: 'compact_row',
+			priority: 10,
+			components: [
+				{
+					type: 'CompactRow',
+					props: {
+						title: 'Versicherung prüfen',
+						subtitle: 'Potenzial sparen entdecken',
+						imageUrl: 'https://via.placeholder.com/80/2ecc71/ffffff?text=ins',
+						price: 'Sparpotenzial',
+						cta: { label: 'Berechnen', action: 'deeplink', deeplink: 'check24://insurance/offer/123' },
+					},
+				},
+			],
+			data: { baseline: true },
+			softExpiresAt,
+			hardExpiresAt,
+			generatedAt,
+			meta: { isBaseline: true },
+		},
+	];
+}
+
+function ensureMinWidgets(widgets, minCount) {
+	const safeWidgets = Array.isArray(widgets) ? [...widgets] : [];
+	const min = assertFinitePositiveInt(Number(minCount), 3);
+	if (safeWidgets.length >= min) return safeWidgets;
+
+	const existingIds = new Set(safeWidgets.map((w) => `${w.productId}:${w.widgetId}`));
+	for (const candidate of buildBaselineWidgets()) {
+		const id = `${candidate.productId}:${candidate.widgetId}`;
+		if (existingIds.has(id)) continue;
+		safeWidgets.push(candidate);
+		existingIds.add(id);
+		if (safeWidgets.length >= min) break;
+	}
+
+	return safeWidgets;
+}
+
+function buildAffinityKey(userId) {
+	return `affinity:${userId}`;
+}
+
+const signalBodySchema = {
+	type: 'object',
+	required: ['userId', 'signal', 'weight'],
+	additionalProperties: false,
+	properties: {
+		userId: { type: 'string', minLength: 1, maxLength: 128 },
+		signal: { type: 'string', enum: ['interest'] },
+		weight: { type: 'number', minimum: 0.1, maximum: 100 },
+	},
+};
+
+fastify.post(
+	'/api/signals',
+	{
+		schema: {
+			body: signalBodySchema,
+		},
+	},
+	async (request, reply) => {
+		const productId = String(getHeader(request, 'x-product-id') || '').trim();
+		const apiKey = String(getHeader(request, 'x-api-key') || '').trim();
+		const expectedKey = productId ? String(getIngestKeyForProduct(productId) || '').trim() : '';
+
+		if (!productId || !apiKey || !expectedKey || expectedKey !== apiKey) {
+			return reply.status(403).send({ error: 'Forbidden' });
+		}
+
+		const { userId, weight } = request.body;
+		const affinityKey = buildAffinityKey(userId);
+
+		try {
+			await redis.hIncrByFloat(affinityKey, productId, weight);
+			await redis.expire(affinityKey, 3600);
+			return reply.send({ status: 'signal_processed', productId, weight });
+		} catch (error) {
+			request.log.error({ error }, 'Failed to process signal');
+			return reply.status(500).send({ error: 'Signal Failure' });
+		}
+	}
+);
 
 function getContentLengthBytes(request) {
 	const raw = request.headers['content-length'];
@@ -419,14 +576,24 @@ fastify.post(
 
 		const widgetKey = buildWidgetKey(userId, productId, widgetId);
 		const userIndexKey = buildUserIndexKey(userId);
+		const latestWidgetKeyKey = buildUserProductLatestWidgetKey(userId, productId);
 
 		try {
+			const previousWidgetKey = await redis.get(latestWidgetKeyKey);
+			const shouldRemovePrevious =
+				previousWidgetKey && typeof previousWidgetKey === 'string' && previousWidgetKey !== widgetKey;
+
 			const multi = redis.multi();
 			multi.set(widgetKey, JSON.stringify(envelope), {
 				EX: assertFinitePositiveInt(widgetHardTtlSeconds, 3600),
 			});
 			multi.sAdd(userIndexKey, widgetKey);
 			multi.expire(userIndexKey, assertFinitePositiveInt(indexTtlSeconds, 604800));
+			multi.set(latestWidgetKeyKey, widgetKey, { EX: assertFinitePositiveInt(indexTtlSeconds, 604800) });
+			if (shouldRemovePrevious) {
+				multi.sRem(userIndexKey, previousWidgetKey);
+				multi.del(previousWidgetKey);
+			}
 			await multi.exec();
 
 			return reply.send({ status: 'acknowledged' });
@@ -441,9 +608,13 @@ fastify.get('/api/home', async (request, reply) => {
 	const userId = await resolveUserIdOrThrow(request, reply);
 	if (!userId) return;
 	const userIndexKey = buildUserIndexKey(userId);
+	const affinityKey = buildAffinityKey(userId);
 
 	try {
-		const widgetKeys = await withTimeout(redis.sMembers(userIndexKey), redisReadTimeoutMs, 'redis.sMembers(userIndexKey)');
+		const [widgetKeys, affinities] = await Promise.all([
+			withTimeout(redis.sMembers(userIndexKey), redisReadTimeoutMs, 'redis.sMembers(userIndexKey)'),
+			withTimeout(redis.hGetAll(affinityKey), redisReadTimeoutMs, 'redis.hGetAll(affinityKey)'),
+		]);
 		if (!widgetKeys || widgetKeys.length === 0) {
 			const response = buildEmptyHomeResponse({ degraded: false });
 			lkgSet(userId, response);
@@ -464,7 +635,14 @@ fastify.get('/api/home', async (request, reply) => {
 			}
 
 			try {
-				widgets.push(JSON.parse(raw));
+				const widget = JSON.parse(raw);
+				const affinityScore = Number.parseFloat(affinities?.[widget.productId] || '0');
+				const boost = affinityScore * 20;
+				widget.priority = (widget.priority || 0) + boost;
+				if (boost > 0) {
+					widget.meta = { ...(widget.meta || {}), isPersonalized: true, reason: 'Based on your recent interest' };
+				}
+				widgets.push(widget);
 			} catch {
 				expiredKeys.push(key);
 			}
@@ -479,12 +657,13 @@ fastify.get('/api/home', async (request, reply) => {
 		}
 
 		widgets.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+		const filledWidgets = ensureMinWidgets(widgets, assertFinitePositiveInt(minWidgets, 3));
 
 		const response = {
 			schemaVersion: '1.0',
 			generatedAt: nowIso(),
 			greeting: 'Willkommen zurück!',
-			widgets,
+			widgets: filledWidgets,
 		};
 		lkgSet(userId, response);
 		return reply.send(response);
