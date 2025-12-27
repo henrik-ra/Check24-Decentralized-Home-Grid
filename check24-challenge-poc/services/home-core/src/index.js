@@ -289,13 +289,116 @@ function assertFinitePositiveInt(value, fallback) {
 }
 
 function buildEmptyHomeResponse({ degraded, reason }) {
+	const widgets = ensureMinWidgets([], 3);
 	return {
 		schemaVersion: '1.0',
 		generatedAt: nowIso(),
 		greeting: 'Willkommen',
-		widgets: [],
+		widgets,
 		...(degraded ? { meta: { degraded: true, reason: reason || 'unavailable', source: 'empty' } } : {}),
 	};
+}
+
+function buildBaselineWidgets() {
+	// Baseline widgets are Home-owned, non-personalized fillers.
+	// They guarantee a non-empty Home without calling product systems or pushing to all users.
+	// Keep them simple, stable, and cross-platform (CompactRow).
+	const productId = 'BASELINE';
+	const generatedAt = nowIso();
+	const softExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(widgetSoftTtlSeconds, 60));
+	const hardExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(widgetHardTtlSeconds, 3600));
+
+	return [
+		{
+			schemaVersion: '1.0',
+			widgetId: 'baseline.travel.v1',
+			productId,
+			type: 'compact_row',
+			priority: 30,
+			components: [
+				{
+					type: 'CompactRow',
+					props: {
+						title: 'Urlaub finden',
+						subtitle: 'Top Pauschalreisen entdecken',
+						imageUrl: 'https://via.placeholder.com/80/00b4db/ffffff?text=travel',
+						price: 'Top Deals',
+						cta: { label: 'Ansehen', action: 'deeplink', deeplink: 'c24://travel/details' },
+					},
+				},
+			],
+			data: { baseline: true },
+			softExpiresAt,
+			hardExpiresAt,
+			generatedAt,
+			meta: { isBaseline: true },
+		},
+		{
+			schemaVersion: '1.0',
+			widgetId: 'baseline.dsl.v1',
+			productId,
+			type: 'compact_row',
+			priority: 20,
+			components: [
+				{
+					type: 'CompactRow',
+					props: {
+						title: 'Internet vergleichen',
+						subtitle: 'Tarife für Zuhause prüfen',
+						imageUrl: 'https://via.placeholder.com/80/663399/ffffff?text=dsl',
+						price: 'Schnell  26 günstig',
+						cta: { label: 'Vergleichen', action: 'deeplink', deeplink: 'c24://dsl/details' },
+					},
+				},
+			],
+			data: { baseline: true },
+			softExpiresAt,
+			hardExpiresAt,
+			generatedAt,
+			meta: { isBaseline: true },
+		},
+		{
+			schemaVersion: '1.0',
+			widgetId: 'baseline.insurance.v1',
+			productId,
+			type: 'compact_row',
+			priority: 10,
+			components: [
+				{
+					type: 'CompactRow',
+					props: {
+						title: 'Versicherung prüfen',
+						subtitle: 'Potenzial sparen entdecken',
+						imageUrl: 'https://via.placeholder.com/80/2ecc71/ffffff?text=ins',
+						price: 'Sparpotenzial',
+						cta: { label: 'Berechnen', action: 'deeplink', deeplink: 'c24://insurance/details' },
+					},
+				},
+			],
+			data: { baseline: true },
+			softExpiresAt,
+			hardExpiresAt,
+			generatedAt,
+			meta: { isBaseline: true },
+		},
+	];
+}
+
+function ensureMinWidgets(widgets, minCount) {
+	const safeWidgets = Array.isArray(widgets) ? [...widgets] : [];
+	const min = assertFinitePositiveInt(Number(minCount), 3);
+	if (safeWidgets.length >= min) return safeWidgets;
+
+	const existingIds = new Set(safeWidgets.map((w) => `${w.productId}:${w.widgetId}`));
+	for (const candidate of buildBaselineWidgets()) {
+		const id = `${candidate.productId}:${candidate.widgetId}`;
+		if (existingIds.has(id)) continue;
+		safeWidgets.push(candidate);
+		existingIds.add(id);
+		if (safeWidgets.length >= min) break;
+	}
+
+	return safeWidgets;
 }
 
 function getContentLengthBytes(request) {
@@ -437,13 +540,65 @@ fastify.post(
 	}
 );
 
+function buildAffinityKey(userId) {
+	return `affinity:${userId}`;
+}
+
+const signalBodySchema = {
+	type: 'object',
+	required: ['userId', 'signal', 'weight'],
+	additionalProperties: false,
+	properties: {
+		userId: { type: 'string', minLength: 1, maxLength: 128 },
+		signal: { type: 'string', enum: ['interest'] },
+		weight: { type: 'number', minimum: 0.1, maximum: 100 },
+	},
+};
+
+fastify.post(
+	'/api/signals',
+	{
+		schema: {
+			body: signalBodySchema,
+		},
+	},
+	async (request, reply) => {
+		const productId = String(getHeader(request, 'x-product-id') || '').trim();
+		const apiKey = String(getHeader(request, 'x-api-key') || '').trim();
+		const expectedKey = productId ? String(getIngestKeyForProduct(productId) || '').trim() : '';
+
+		if (!productId || !apiKey || !expectedKey || expectedKey !== apiKey) {
+			return reply.status(403).send({ error: 'Forbidden' });
+		}
+
+		const { userId, weight } = request.body;
+		const affinityKey = buildAffinityKey(userId);
+
+		try {
+			// Increment affinity score for this product
+			await redis.hIncrByFloat(affinityKey, productId, weight);
+			// Set expiry for the affinity profile (e.g., 1 hour)
+			await redis.expire(affinityKey, 3600);
+			return reply.send({ status: 'signal_processed', productId, newWeight: weight });
+		} catch (error) {
+			request.log.error({ error }, 'Failed to process signal');
+			return reply.status(500).send({ error: 'Signal Failure' });
+		}
+	}
+);
+
 fastify.get('/api/home', async (request, reply) => {
 	const userId = await resolveUserIdOrThrow(request, reply);
 	if (!userId) return;
 	const userIndexKey = buildUserIndexKey(userId);
+	const affinityKey = buildAffinityKey(userId);
 
 	try {
-		const widgetKeys = await withTimeout(redis.sMembers(userIndexKey), redisReadTimeoutMs, 'redis.sMembers(userIndexKey)');
+		const [widgetKeys, affinities] = await Promise.all([
+			withTimeout(redis.sMembers(userIndexKey), redisReadTimeoutMs, 'redis.sMembers'),
+			withTimeout(redis.hGetAll(affinityKey), redisReadTimeoutMs, 'redis.hGetAll'),
+		]);
+
 		if (!widgetKeys || widgetKeys.length === 0) {
 			const response = buildEmptyHomeResponse({ degraded: false });
 			lkgSet(userId, response);
@@ -464,7 +619,19 @@ fastify.get('/api/home', async (request, reply) => {
 			}
 
 			try {
-				widgets.push(JSON.parse(raw));
+				const widget = JSON.parse(raw);
+				// Personalization Logic:
+				// Calculate effective priority based on user affinity
+				const affinityScore = Number.parseFloat(affinities?.[widget.productId] || '0');
+				const boost = affinityScore * 20; // Multiplier: 1 interest point = +20 priority
+				
+				widget.priority = (widget.priority || 0) + boost;
+				
+				if (boost > 0) {
+					widget.meta = { ...widget.meta, reason: 'Based on your recent interest', isPersonalized: true };
+				}
+				
+				widgets.push(widget);
 			} catch {
 				expiredKeys.push(key);
 			}
@@ -479,12 +646,13 @@ fastify.get('/api/home', async (request, reply) => {
 		}
 
 		widgets.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+		const filledWidgets = ensureMinWidgets(widgets, 3);
 
 		const response = {
 			schemaVersion: '1.0',
 			generatedAt: nowIso(),
 			greeting: 'Willkommen zurück!',
-			widgets,
+			widgets: filledWidgets,
 		};
 		lkgSet(userId, response);
 		return reply.send(response);

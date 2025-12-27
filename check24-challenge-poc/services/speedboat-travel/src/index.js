@@ -8,7 +8,7 @@ const ingestApiKey = process.env.INGEST_API_KEY || 'dev-secret-123';
 const pushIntervalMs = Number.parseInt(process.env.PUSH_INTERVAL_MS || '5000', 10);
 
 // State
-// Map<email, Set<vertical>>
+// Map<email, Map<vertical, count>>
 const userInterests = new Map();
 
 // Plugins
@@ -29,18 +29,30 @@ fastify.post('/api/simulate/interest', async (request, reply) => {
   fastify.log.info({ email, vertical: targetVertical }, 'User showed interest');
   
   if (!userInterests.has(email)) {
-    userInterests.set(email, new Set());
+    userInterests.set(email, new Map());
   }
-  userInterests.get(email).add(targetVertical);
+  
+  const userVerticals = userInterests.get(email);
+  const currentCount = userVerticals.get(targetVertical) || 0;
+  const newCount = currentCount + 1;
+  userVerticals.set(targetVertical, newCount);
   
   // Immediate push for instant feedback
-  await pushUpdateForUser(email, targetVertical);
+  await pushUpdateForUser(email, targetVertical, newCount);
 
-  return { status: 'interest_registered', message: 'Started pushing ' + targetVertical + ' widgets for ' + email };
+  return { 
+    status: 'interest_registered', 
+    message: `Started pushing ${targetVertical} widgets for ${email} (Intensity: ${newCount})` 
+  };
 });
 
 fastify.get('/health', async () => {
-  return { status: 'ok', userInterests: Array.from(userInterests.entries()) };
+  // Convert Map<email, Map<vertical, count>> to something JSON serializable for debug
+  const debugState = {};
+  for (const [email, verticals] of userInterests.entries()) {
+    debugState[email] = Object.fromEntries(verticals);
+  }
+  return { status: 'ok', userInterests: debugState };
 });
 
 // Widget Templates
@@ -90,66 +102,110 @@ const WIDGET_TEMPLATES = {
 };
 
 // Push Logic
-async function pushUpdateForUser(userId, vertical) {
+async function pushUpdateForUser(userId, vertical, intensity) {
   const template = WIDGET_TEMPLATES[vertical];
   if (!template) return;
 
   const price = Math.floor(Math.random() * 200) + 20;
   const widgetId = vertical + '.hero.v1';
 
+  // Adaptive Layout Logic:
+  // Intensity 1-2: CompactRow (Low intrusion)
+  // Intensity > 2: HeroBanner (High impact)
+  const useCompactLayout = intensity <= 2;
+
+  let components = [];
+  
+  if (useCompactLayout) {
+    components = [{
+      type: 'CompactRow',
+      props: {
+        title: template.title,
+        subtitle: template.subtitle,
+        imageUrl: `https://via.placeholder.com/80/${template.color.replace('#', '')}/ffffff?text=${vertical}`,
+        price: `ab ${price} €`,
+        cta: {
+          label: template.cta,
+          action: 'deeplink',
+          deeplink: `c24://${vertical}/details`,
+        },
+      }
+    }];
+  } else {
+    components = [{
+      type: 'HeroBanner',
+      props: {
+        title: template.title,
+        subtitle: template.subtitle,
+        imageUrl: `https://via.placeholder.com/150/${template.color.replace('#', '')}/ffffff?text=${vertical}`,
+        price: `ab ${price} €`,
+        cta: {
+          label: template.cta,
+          action: 'deeplink',
+          deeplink: `c24://${vertical}/details`,
+        },
+      }
+    }];
+  }
+
+  // Step 1: Ingest Widget
   const payload = {
     userId,
     widgetData: {
       widgetId,
-      type: 'hero_banner',
-      priority: template.priority,
-      components: [
-        {
-          type: 'HeroBanner',
-          props: {
-            title: template.title + ' f�r ' + userId,
-            subtitle: template.subtitle,
-            price: price + ' �',
-            imageUrl: 'https://via.placeholder.com/150/' + template.color.replace('#', '') + '/ffffff?text=' + vertical,
-            cta: { label: template.cta, deeplink: 'check24://' + vertical + '/offer/123' },
-          },
-        },
-        {
-          type: 'TextCard',
-          props: {
-            label: 'Personalized hint',
-            title: 'Warum ' + vertical + '?',
-            text: 'Wir haben ein Top-Angebot f�r ' + vertical + ' gefunden (Priorit�t ' + template.priority + ').',
-          },
-        },
-      ],
+      type: useCompactLayout ? 'compact_row' : 'hero_banner',
+      priority: template.priority, 
+      components: components,
       data: {
-        price: price + ' �',
+        price,
+        currency: 'EUR',
       },
     },
   };
 
   try {
-    await axios.post(coreUrl + '/api/ingest', payload, {
+    // Send Widget
+    await axios.post(`${coreUrl}/api/ingest`, payload, {
       headers: {
         'x-product-id': vertical.toUpperCase(),
         'x-api-key': ingestApiKey,
+        'Content-Type': 'application/json',
         'idempotency-key': crypto.randomUUID(),
       },
       timeout: 2000,
     });
-    fastify.log.info('[speedboat] pushed ' + vertical + ' for user=' + userId);
-  } catch (error) {
-    fastify.log.error('[speedboat] core unreachable (' + error.message + ')');
+
+    // Step 2: Send Affinity Signal
+    // We tell Home Core: "User showed interest in this vertical"
+    // Clean weighting (no hacks): baseline is handled by Home Core, so we only express interest strength.
+    // Intensity 1-2: small boost, Intensity >= 3: stronger boost.
+    const signalWeight = Math.min(10.0, useCompactLayout ? 2.0 + (intensity * 1.5) : 7.5 + ((intensity - 2) * 1.0));
+
+    await axios.post(`${coreUrl}/api/signals`, {
+      userId,
+      signal: 'interest',
+      weight: signalWeight
+    }, {
+      headers: {
+        'x-product-id': vertical.toUpperCase(),
+        'x-api-key': ingestApiKey,
+        'Content-Type': 'application/json',
+      },
+      timeout: 2000,
+    });
+
+    fastify.log.info({ userId, vertical, intensity, layout: useCompactLayout ? 'Compact' : 'Hero' }, 'Pushed widget and affinity signal');
+  } catch (err) {
+    fastify.log.error({ err: err.message }, 'Failed to push update');
   }
 }
 
 // Loop
 setInterval(async () => {
   if (userInterests.size === 0) return;
-  for (const [email, verticals] of userInterests.entries()) {
-    for (const vertical of verticals) {
-      await pushUpdateForUser(email, vertical);
+  for (const [email, verticalsMap] of userInterests.entries()) {
+    for (const [vertical, count] of verticalsMap.entries()) {
+      await pushUpdateForUser(email, vertical, count);
     }
   }
 }, pushIntervalMs);
