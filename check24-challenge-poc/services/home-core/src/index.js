@@ -63,6 +63,27 @@ const indexTtlSeconds = Number.parseInt(process.env.INDEX_TTL_SECONDS || '604800
 const idempotencyTtlSeconds = Number.parseInt(process.env.IDEMPOTENCY_TTL_SECONDS || '300', 10);
 const maxPayloadBytes = Number.parseInt(process.env.MAX_INGEST_PAYLOAD_BYTES || '65536', 10); // 64KB
 
+// Optional LLM-based welcome text (best-effort; falls back to local templates)
+// Supports either:
+// - OpenAI directly: set OPENAI_API_KEY (optional: OPENAI_BASE_URL, OPENAI_MODEL)
+// - OpenRouter: set OPENROUTER_API_KEY (optional: OPENROUTER_MODEL, OPENROUTER_SITE_URL, OPENROUTER_APP_NAME)
+const openRouterApiKey = process.env.OPENROUTER_API_KEY || '';
+const openAiApiKey = process.env.OPENAI_API_KEY || '';
+
+const llmApiKey = openRouterApiKey || openAiApiKey;
+const llmBaseUrl = String(
+	process.env.LLM_BASE_URL ||
+		(openRouterApiKey ? 'https://openrouter.ai/api/v1' : process.env.OPENAI_BASE_URL) ||
+		'https://api.openai.com/v1'
+).replace(/\/+$/g, '');
+const llmModel =
+	process.env.LLM_MODEL ||
+	(openRouterApiKey ? process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini' : process.env.OPENAI_MODEL || 'gpt-4o-mini');
+const openRouterSiteUrl = process.env.OPENROUTER_SITE_URL || '';
+const openRouterAppName = process.env.OPENROUTER_APP_NAME || '';
+const welcomeTextTimeoutMs = Number.parseInt(process.env.WELCOME_TEXT_TIMEOUT_MS || '1200', 10);
+const welcomeTextTtlSeconds = Number.parseInt(process.env.WELCOME_TEXT_TTL_SECONDS || '300', 10);
+
 // Rate limiting (per productId)
 const ingestRateLimitPerMinute = Number.parseInt(process.env.INGEST_RATE_LIMIT_PER_MINUTE || '120', 10);
 const ingestRateLimitWindowSeconds = 60;
@@ -385,12 +406,26 @@ function assertFinitePositiveInt(value, fallback) {
 
 const minWidgets = Number.parseInt(process.env.MIN_WIDGETS || '3', 10);
 
+function svgDataUrl(options) {
+	const width = Number.isFinite(options?.width) ? options.width : 80;
+	const height = Number.isFinite(options?.height) ? options.height : 80;
+	const text = String(options?.text ?? '').slice(0, 12);
+	const bg = String(options?.bg ?? '#eeeeee');
+	const fg = String(options?.fg ?? '#333333');
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+	<rect width="100%" height="100%" fill="${bg}" />
+	<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="${fg}" font-family="Arial, sans-serif" font-size="18">${text}</text>
+</svg>`;
+	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function buildEmptyHomeResponse({ degraded, reason }) {
 	const widgets = ensureMinWidgets([], assertFinitePositiveInt(minWidgets, 3));
 	return {
 		schemaVersion: '1.0',
 		generatedAt: nowIso(),
 		greeting: 'Willkommen',
+		welcomeText: 'Schön, dass du da bist. Entdecke heute neue Angebote.',
 		widgets,
 		...(degraded ? { meta: { degraded: true, reason: reason || 'unavailable', source: 'empty' } } : {}),
 	};
@@ -419,6 +454,10 @@ function buildBaselineWidgets() {
 	const dslOfferUrl = withOfferPath(process.env.DSL_WEB_URL, 'check24://dsl/offer/123');
 	const insuranceOfferUrl = withOfferPath(process.env.INSURANCE_WEB_URL, 'check24://insurance/offer/123');
 
+	const travelIcon = 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=80&h=80&fit=crop';
+	const dslIcon = 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=80&h=80&fit=crop';
+	const insuranceIcon = 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=80&h=80&fit=crop';
+
 	return [
 		{
 			schemaVersion: '1.0',
@@ -432,7 +471,7 @@ function buildBaselineWidgets() {
 					props: {
 						title: 'Urlaub finden',
 						subtitle: 'Top Pauschalreisen entdecken',
-						imageUrl: 'https://via.placeholder.com/80/00b4db/ffffff?text=travel',
+						imageUrl: travelIcon,
 						price: 'Top Deals',
 						cta: { label: 'Ansehen', action: 'deeplink', deeplink: travelOfferUrl },
 					},
@@ -456,7 +495,7 @@ function buildBaselineWidgets() {
 					props: {
 						title: 'Internet vergleichen',
 						subtitle: 'Tarife für Zuhause prüfen',
-						imageUrl: 'https://via.placeholder.com/80/663399/ffffff?text=dsl',
+						imageUrl: dslIcon,
 						price: 'Schnell & günstig',
 						cta: { label: 'Vergleichen', action: 'deeplink', deeplink: dslOfferUrl },
 					},
@@ -480,7 +519,7 @@ function buildBaselineWidgets() {
 					props: {
 						title: 'Versicherung prüfen',
 						subtitle: 'Potenzial sparen entdecken',
-						imageUrl: 'https://via.placeholder.com/80/2ecc71/ffffff?text=ins',
+						imageUrl: insuranceIcon,
 						price: 'Sparpotenzial',
 						cta: { label: 'Berechnen', action: 'deeplink', deeplink: insuranceOfferUrl },
 					},
@@ -510,6 +549,129 @@ function ensureMinWidgets(widgets, minCount) {
 	}
 
 	return safeWidgets;
+}
+
+function normalizeWelcomeText(value) {
+	const text = String(value || '')
+		.replace(/\s+/g, ' ')
+		.replace(/^\s+|\s+$/g, '')
+		.replace(/^["'`]+|["'`]+$/g, '');
+	if (!text) return '';
+	return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
+
+function getInterestDisplayName(productId) {
+	const id = String(productId || '').trim().toLowerCase();
+	if (!id) return undefined;
+	const map = {
+		travel: 'Reisen',
+		dsl: 'Internet',
+		insurance: 'Versicherung',
+	};
+	return map[id] || id.toUpperCase();
+}
+
+function getTopInterestsFromAffinities(affinities, limit) {
+	const entries = Object.entries(affinities || {})
+		.map(([productId, rawScore]) => {
+			const score = Number.parseFloat(String(rawScore));
+			return { productId, score: Number.isFinite(score) ? score : 0 };
+		})
+		.filter((x) => x.score > 0);
+
+	entries.sort((a, b) => b.score - a.score);
+	const capped = entries.slice(0, assertFinitePositiveInt(limit, 2));
+	return capped
+		.map((x) => ({ productId: x.productId, score: x.score, label: getInterestDisplayName(x.productId) }))
+		.filter((x) => Boolean(x.label));
+}
+
+function buildFallbackWelcomeText(interests) {
+	const top = interests?.[0]?.label;
+	if (!top) {
+		const genericVariants = [
+			'Schön, dass du da bist! Heute ist ein guter Tag für neue Entdeckungen. 🎯',
+			'Willkommen zurück! Bereit für frische Inspirationen?',
+			'Hey! Lass uns gemeinsam die besten Deals finden.',
+			'Perfektes Timing! Dein persönlicher Feed wartet auf dich.',
+			'Na, auf der Suche nach dem perfekten Angebot? Du bist hier richtig!',
+			'Willkommen! Heute haben wir ein paar Überraschungen für dich parat.',
+			'Schön, dich zu sehen! Stöber durch deine persönlichen Highlights.',
+		];
+		return genericVariants[Math.floor(Math.random() * genericVariants.length)];
+	}
+
+	const variants = [
+		`Willkommen zurück! Lust auf frische ${top}-Highlights?`,
+		`Hey! Wir haben spannende ${top}-Ideen für dich.`,
+		`Schön, dich zu sehen – wie wär's mit ${top}?`,
+		`Willkommen! Dein ${top}-Feed ist heute besonders interessant.`,
+		`Perfekt! Genau der richtige Moment für ${top}-Inspirationen.`,
+		`Na, bereit für neue ${top}-Entdeckungen? Los geht's!`,
+	];
+	return variants[Math.floor(Math.random() * variants.length)];
+}
+
+async function generateWelcomeTextWithLlm(interests) {
+	if (!llmApiKey) return '';
+	const interestLabels = (interests || []).map((x) => x.label).filter(Boolean);
+	if (interestLabels.length === 0) return '';
+
+	const prompt = {
+		model: llmModel,
+		messages: [
+			{
+				role: 'system',
+				content:
+					'Du bist ein Copywriter für eine CHECK24-ähnliche Home-Seite. Antworte auf Deutsch in 1 kurzen Satz (max 140 Zeichen), ohne Emojis, ohne Anführungszeichen, ohne Markdown.',
+			},
+			{
+				role: 'user',
+				content: `Generiere einen kreativen Willkommenstext basierend auf diesen Interessen: ${interestLabels.join(', ')}. Erwähne höchstens ein Thema.`,
+			},
+		],
+		temperature: 0.8,
+	};
+
+	const headers = {
+		'content-type': 'application/json',
+		authorization: `Bearer ${llmApiKey}`,
+	};
+	if (openRouterApiKey && openRouterSiteUrl) headers['HTTP-Referer'] = openRouterSiteUrl;
+	if (openRouterApiKey && openRouterAppName) headers['X-Title'] = openRouterAppName;
+
+	const response = await fetch(`${llmBaseUrl}/chat/completions`, {
+		method: 'POST',
+		headers,
+		body: JSON.stringify(prompt),
+	});
+
+	if (!response.ok) {
+		const bodyText = await response.text().catch(() => '');
+		throw new Error(`LLM failed: ${response.status}${bodyText ? ` - ${bodyText}` : ''}`);
+	}
+
+	const data = await response.json();
+	const text = data?.choices?.[0]?.message?.content;
+	return normalizeWelcomeText(text);
+}
+
+async function getOrGenerateWelcomeText(request, userId, affinities) {
+	// Caching disabled: generate fresh welcome text on every request for dynamic personalization
+	const interests = getTopInterestsFromAffinities(affinities, 2);
+	let text = '';
+	try {
+		text = await withTimeout(
+			generateWelcomeTextWithLlm(interests),
+			assertFinitePositiveInt(welcomeTextTimeoutMs, 1200),
+			'welcomeText.llm'
+		);
+	} catch (error) {
+		request.log.warn({ error: error?.message }, 'Welcome text LLM generation failed; falling back');
+	}
+	if (!text) text = buildFallbackWelcomeText(interests);
+
+	return text;
 }
 
 function buildAffinityKey(userId) {
@@ -717,8 +879,12 @@ fastify.get('/api/home', async (request, reply) => {
 			withTimeout(redis.sMembers(userIndexKey), redisReadTimeoutMs, 'redis.sMembers(userIndexKey)'),
 			withTimeout(redis.hGetAll(affinityKey), redisReadTimeoutMs, 'redis.hGetAll(affinityKey)'),
 		]);
+		
+		const welcomeText = await getOrGenerateWelcomeText(request, userId, affinities);
+		
 		if (!widgetKeys || widgetKeys.length === 0) {
 			const response = buildEmptyHomeResponse({ degraded: false });
+			response.welcomeText = welcomeText;
 			lkgSet(userId, response);
 			return reply.send(response);
 		}
@@ -765,6 +931,7 @@ fastify.get('/api/home', async (request, reply) => {
 			schemaVersion: '1.0',
 			generatedAt: nowIso(),
 			greeting: 'Willkommen zurück!',
+			welcomeText,
 			widgets: filledWidgets,
 		};
 		lkgSet(userId, response);

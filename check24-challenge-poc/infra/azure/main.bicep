@@ -43,6 +43,10 @@ param mongoDbUri string
 @secure()
 param jwtSecret string
 
+@description('OpenRouter API key for LLM-based welcome text generation. Optional.')
+@secure()
+param openRouterApiKey string = ''
+
 @description('Demo user id for the speedboat producer (should match the user id used by auth; this PoC uses email as user id).')
 param demoUserId string = 'demo@example.com'
 
@@ -321,6 +325,10 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
         name: 'jwt-secret'
         value: jwtSecret
       }
+      {
+        name: 'openrouter-api-key'
+        value: openRouterApiKey
+      }
     ]
 
     registries: [
@@ -375,6 +383,22 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
           {
             name: 'JWT_EXPIRES_IN'
             value: '7d'
+          }
+          {
+            name: 'OPENROUTER_API_KEY'
+            secretRef: 'openrouter-api-key'
+          }
+          {
+            name: 'OPENROUTER_SITE_URL'
+            value: 'https://check24-home-poc.example.com'
+          }
+          {
+            name: 'OPENROUTER_APP_NAME'
+            value: 'CHECK24 Home PoC'
+          }
+          {
+            name: 'WELCOME_TEXT_TTL_SECONDS'
+            value: '300'
           }
           // Filled later by deploy.ps1 (after static sites exist)
           {

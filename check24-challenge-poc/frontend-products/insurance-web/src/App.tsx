@@ -84,31 +84,31 @@ export function App() {
         id: '301',
         title: 'KFZ Basic',
         subtitle: 'ab 19,90€ / Monat · Basis-Schutz',
-        imageUrl: svgDataUrl({ text: 'INSURANCE 301', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=640&h=360&fit=crop',
       },
       {
         id: '302',
         title: 'KFZ Komfort',
         subtitle: 'ab 24,90€ / Monat · inkl. Schutzbrief',
-        imageUrl: svgDataUrl({ text: 'INSURANCE 302', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=640&h=360&fit=crop',
       },
       {
         id: '303',
         title: 'KFZ Premium',
         subtitle: 'ab 29,90€ / Monat · Premium-Deckung',
-        imageUrl: svgDataUrl({ text: 'INSURANCE 303', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=640&h=360&fit=crop',
       },
       {
         id: '304',
         title: 'Haftpflicht',
         subtitle: 'ab 4,90€ / Monat · Familie',
-        imageUrl: svgDataUrl({ text: 'INSURANCE 304', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1606811971618-4486d14f3f99?w=640&h=360&fit=crop',
       },
       {
         id: '305',
         title: 'Hausrat',
         subtitle: 'ab 6,90€ / Monat · Wohnung',
-        imageUrl: svgDataUrl({ text: 'INSURANCE 305', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=640&h=360&fit=crop',
       },
     ],
     []
@@ -190,7 +190,7 @@ export function App() {
         <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
           <Flex align="center" gap="3" wrap="wrap">
             <img
-              src={svgDataUrl({ text: 'C24', width: 64, height: 64 })}
+              src="https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=48&h=48&fit=crop"
               alt=""
               style={{ width: 28, height: 28, borderRadius: 10, objectFit: 'cover' }}
             />

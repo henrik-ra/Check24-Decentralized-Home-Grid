@@ -131,7 +131,7 @@ async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks 
   // CompactRow is reserved for Home-Core baseline fillers.
   const widgetId = `${vertical}.primary.v1`;
   const offerLabel = String(offerId || '123');
-  const hintImageUrl = svgDataUrl({ text: `${vertical.toUpperCase()} ${offerLabel}`, width: 640, height: 160 });
+  const hintImageUrl = 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=640&h=160&fit=crop';
   const components = [
     {
       type: 'HeroBanner',
@@ -139,7 +139,7 @@ async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks 
         title: `${template.title} für dich`,
         subtitle: template.subtitle,
         price: `${price} €`,
-        imageUrl: svgDataUrl({ text: vertical.toUpperCase(), width: 150, height: 150, bg: template.color, fg: '#ffffff' }),
+        imageUrl: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=150&h=150&fit=crop',
         cta: { label: template.cta, action: 'deeplink', deeplink: buildOfferDeeplink(vertical, offerId) },
       },
     },
@@ -217,17 +217,13 @@ fastify.get('/health', async () => {
   };
 });
 
-setInterval(async () => {
-  if (clickCounts.size === 0) return;
-  for (const [email, map] of clickCounts.entries()) {
-    for (const [vertical, state] of map.entries()) {
-      if (!state) continue;
-      const offerId = state.lastOfferId || '123';
-      const offerClicks = (state.offerCounts && state.offerCounts.get(offerId)) || 1;
-      await pushWidget({ userId: email, vertical, offerId, offerClicks, totalClicks: state.totalCount || offerClicks });
-    }
-  }
-}, pushIntervalMs);
+// EVENT-DRIVEN ARCHITECTURE:
+// Widgets are pushed ONLY in response to explicit user actions (clicks, form submissions).
+// Time-based polling (setInterval) was removed because:
+// 1. Scalability: At 100k users × 5s interval = 20k RPS to Core (unsustainable)
+// 2. UX: Unsolicited price/content changes reduce user trust and conversion
+// 3. Resource efficiency: Widgets are already cached in Redis with TTL; no need for active refresh
+// For production cache invalidation, products can use targeted endpoint: POST /api/invalidate/<userId>
 
 const start = async () => {
   try {

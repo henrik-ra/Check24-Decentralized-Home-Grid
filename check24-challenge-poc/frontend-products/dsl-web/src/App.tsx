@@ -84,31 +84,31 @@ export function App() {
         id: '201',
         title: 'DSL 50 (Starter)',
         subtitle: 'ab 19,99€ / Monat · 24 Monate',
-        imageUrl: svgDataUrl({ text: 'DSL 201', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1606904825846-647eb07f5be2?w=640&h=360&fit=crop',
       },
       {
         id: '202',
         title: 'DSL 100 (Spar-Tarif)',
         subtitle: 'ab 24,99€ / Monat · WLAN Router',
-        imageUrl: svgDataUrl({ text: 'DSL 202', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1558346490-a72e53ae2d4f?w=640&h=360&fit=crop',
       },
       {
         id: '203',
         title: 'DSL 250 (Top Deal)',
         subtitle: 'ab 29,99€ / Monat · Top Preis/Leistung',
-        imageUrl: svgDataUrl({ text: 'DSL 203', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=640&h=360&fit=crop',
       },
       {
         id: '204',
         title: 'Glasfaser 500',
         subtitle: 'ab 39,99€ / Monat · Highspeed',
-        imageUrl: svgDataUrl({ text: 'DSL 204', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=640&h=360&fit=crop',
       },
       {
         id: '205',
         title: 'Glasfaser 1000',
         subtitle: 'ab 49,99€ / Monat · Max Speed',
-        imageUrl: svgDataUrl({ text: 'DSL 205', width: 640, height: 360 }),
+        imageUrl: 'https://images.unsplash.com/photo-1593642532973-d31b6557fa68?w=640&h=360&fit=crop',
       },
     ],
     []
@@ -190,7 +190,7 @@ export function App() {
         <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
           <Flex align="center" gap="3" wrap="wrap">
             <img
-              src={svgDataUrl({ text: 'C24', width: 64, height: 64 })}
+              src="https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=48&h=48&fit=crop"
               alt=""
               style={{ width: 28, height: 28, borderRadius: 10, objectFit: 'cover' }}
             />

@@ -84,31 +84,31 @@ export function App() {
         id: '101',
         title: 'Speedboat City Break (3 Tage)',
         subtitle: 'ab 199€ · inkl. Hotel & Flug',
-        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+101',
+  		imageUrl: 'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=640&h=360&fit=crop',
       },
       {
         id: '102',
         title: 'Speedboat Strandurlaub (7 Tage)',
         subtitle: 'ab 599€ · All Inclusive',
-        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+102',
+  		imageUrl: 'https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=640&h=360&fit=crop',
       },
       {
         id: '103',
         title: 'Speedboat Rundreise (10 Tage)',
         subtitle: 'ab 899€ · geführte Tour',
-        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+103',
+  		imageUrl: 'https://images.unsplash.com/photo-1601581987809-a874a81309c9?w=640&h=360&fit=crop',
       },
       {
         id: '104',
         title: 'Speedboat Familienpaket (5 Tage)',
         subtitle: 'ab 449€ · Kids inklusive',
-        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+104',
+  		imageUrl: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=640&h=360&fit=crop',
       },
       {
         id: '105',
         title: 'Speedboat Luxus-Upgrade (4 Tage)',
         subtitle: 'ab 999€ · Premium Suite',
-        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+105',
+  		imageUrl: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=640&h=360&fit=crop',
       },
     ],
     []
@@ -191,7 +191,7 @@ export function App() {
         <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
           <Flex align="center" gap="3" wrap="wrap">
             <img
-              src={svgDataUrl({ text: 'C24', width: 64, height: 64 })}
+              src="https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=48&h=48&fit=crop"
               alt=""
               style={{ width: 28, height: 28, borderRadius: 10, objectFit: 'cover' }}
             />

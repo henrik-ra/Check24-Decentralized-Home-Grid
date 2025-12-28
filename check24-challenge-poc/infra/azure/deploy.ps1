@@ -37,7 +37,10 @@ param(
   [string]$JwtSecret = "",
 
   [Parameter(Mandatory = $false)]
-  [string]$DemoUserId = "demo@example.com"
+  [string]$DemoUserId = "demo@example.com",
+
+  [Parameter(Mandatory = $fvalse)]
+  [string]$OpenRouterApiKey = "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"
 )
 
 $ErrorActionPreference = "Stop"
@@ -115,6 +118,7 @@ $params = @{
     speedboatInsuranceIngestApiKey = @{ value = $SpeedboatInsuranceIngestApiKey }
     mongoDbUri            = @{ value = $MongoDbUri }
     jwtSecret             = @{ value = $JwtSecret }
+    openRouterApiKey      = @{ value = $OpenRouterApiKey }
     demoUserId             = @{ value = $DemoUserId }
   }
 }

@@ -75,11 +75,7 @@ async function pushWidget({ userId, offerId, offerClicks, totalClicks }) {
   const intensity = Number(offerClicks) || 1;
   const total = Number(totalClicks) || intensity;
   const offerLabel = String(offerId || '123');
-  const hintImageUrl = svgDataUrl({
-    text: `${productId.toUpperCase()} ${offerLabel}`,
-    width: 640,
-    height: 160,
-  });
+  const hintImageUrl = 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=640&h=160&fit=crop';
 
   const widgetId = `${productId}.primary.v1`;
   const components = [
@@ -89,7 +85,7 @@ async function pushWidget({ userId, offerId, offerClicks, totalClicks }) {
         title: `${TEMPLATE.title} für dich`,
         subtitle: TEMPLATE.subtitle,
         price: `${price} €`,
-        imageUrl: svgDataUrl({ text: productId.toUpperCase(), width: 150, height: 150, bg: TEMPLATE.color, fg: '#ffffff' }),
+        imageUrl: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=150&h=150&fit=crop',
         cta: { label: TEMPLATE.cta, action: 'deeplink', deeplink: buildOfferDeeplink(offerId) },
       },
     },
@@ -161,14 +157,13 @@ fastify.get('/health', async () => {
   };
 });
 
-setInterval(async () => {
-  if (clickCounts.size === 0) return;
-  for (const [email, state] of clickCounts.entries()) {
-    const offerId = state.lastOfferId || '123';
-    const offerClicks = (state.offerCounts && state.offerCounts.get(offerId)) || 1;
-    await pushWidget({ userId: email, offerId, offerClicks, totalClicks: state.totalCount || offerClicks });
-  }
-}, pushIntervalMs);
+// EVENT-DRIVEN ARCHITECTURE:
+// Widgets are pushed ONLY in response to explicit user actions (clicks, form submissions).
+// Time-based polling (setInterval) was removed because:
+// 1. Scalability: At 100k users × 5s interval = 20k RPS to Core (unsustainable)
+// 2. UX: Unsolicited price/content changes reduce user trust and conversion
+// 3. Resource efficiency: Widgets are already cached in Redis with TTL; no need for active refresh
+// For production cache invalidation, products can use targeted endpoint: POST /api/invalidate/<userId>
 
 const start = async () => {
   try {

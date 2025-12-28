@@ -16,9 +16,12 @@ This document describes the current Proof of Concept implementation for a person
 	- `POST /api/signals` (write path for lightweight interest signals)
 	- `GET /api/home` (read path for clients)
 	- `POST /api/auth/register`, `POST /api/auth/login` (JWT issuance for clients)
+	- `POST /api/auth/handoff`, `POST /api/auth/exchange` (cross-origin SSO handoff for product sites)
 - **Redis**: Snapshot store for widget payloads + per-user index + idempotency + rate limit counters.
 - **Speedboats (product services)**: Push snapshots periodically or event-driven.
-- **Clients**: Web (React) and Android (Compose) render the same SDUI payload.
+- **Clients**:
+	- **Home clients**: Web (React) and Android (Compose) render the same SDUI payload.
+	- **Product web sites**: separate webapps (separate origins) that talk to their speedboat and use SSO exchange to obtain a JWT.
 
 **Key idea: push-based snapshots**
 - Products push widget snapshots ahead of time.
@@ -33,6 +36,13 @@ This document describes the current Proof of Concept implementation for a person
 3. Home Core validates payload shape and enforces limits.
 4. Home Core stores the snapshot in Redis with a hard TTL.
 5. Home Core updates a per-user index set so the read path can resolve all widget keys efficiently.
+
+### Signals path (product → Home Core)
+1. Product emits a lightweight interest signal (e.g. user clicked an offer).
+2. Product calls `POST /api/signals` with headers `x-product-id` + `x-api-key`.
+3. Home Core updates per-user affinity scores in Redis.
+
+These signals are used to bias ranking and make baseline content feel more relevant without introducing read-path coupling to product systems.
 
 ### Read path (client → Home Core)
 1. Client calls `GET /api/home` with `Authorization: Bearer <JWT>`.
@@ -53,6 +63,21 @@ This document describes the current Proof of Concept implementation for a person
 	- If no LKG exists, Home Core returns a baseline-filled response (minimum 3 widgets).
 
 This keeps the Home endpoint up during dependency outages without ever calling product backends.
+
+## Cross-origin SSO (Home → product sites)
+
+The PoC runs product sites as separate webapps (separate origins). Instead of shared cookies on a parent domain, we use a short-lived one-time handoff code stored in Redis.
+
+Flow:
+1. Home Web has a JWT. When a user navigates to a product site, Home Web calls `POST /api/auth/handoff` (Authorization: Bearer JWT).
+2. Home Core stores `auth:handoff:{code} -> userId` in Redis for a short TTL and returns the code.
+3. Home Web redirects to the product site with `?handoff=<code>`.
+4. Product site calls `POST /api/auth/exchange` with `{ code }`.
+5. Home Core consumes the code from Redis and returns a JWT to the product site.
+
+Notes:
+- This is best-effort: if handoff fails, navigation still works (user may need to enter an email depending on product page UX).
+- Some Redis providers/versions do not support `GETDEL`. The PoC exchange endpoint falls back to `GET` + `DEL`.
 
 ## Storage model (Redis)
 
@@ -101,6 +126,22 @@ The concrete renderers live in:
 - Web: `frontend-web/src/components/WidgetRenderer.tsx`
 - Android: `frontend-mobile/android/app/src/main/java/.../MainActivity.kt`
 
+### Images in widgets (PoC)
+
+Some components support optional images:
+- `HeroBanner.props.imageUrl`
+- `TextCard.props.imageUrl`
+
+To keep the PoC robust in locked-down environments (ad blockers / DNS / proxies), mock images are generated as inline SVG `data:` URLs where possible.
+
+## Product offers → click tracking → personalized hint
+
+Each product site displays 5 mock offers. Clicking an offer does two things:
+1. Sends an "interest" event to the product speedboat (e.g. `POST /api/simulate/interest` with `{ email, offerId }`).
+2. Navigates to `/offer/{offerId}` within the product webapp.
+
+Each speedboat aggregates clicks per user and per offer and pushes a product/offer-specific "Personalized hint" `TextCard` to Home Core. This demonstrates decentralized personalization where product teams fully own their content.
+
 ## TTL semantics
 
 This PoC encodes two times:
@@ -145,6 +186,40 @@ This PoC is intentionally simple, but the pattern scales:
 	- Durable storage for long-lived personalization (e.g., database) + Redis as cache
 	- Asynchronous ingest via a queue (for smoothing spikes)
 	- Stronger authN/authZ (mTLS/OAuth, key rotation), auditing and per-tenant controls
+
+## Azure deployment architecture (IaC)
+
+The repo includes an Azure deployment using:
+- Azure Container Apps: `home-core` + 3 speedboats
+- Azure Cache for Redis
+- Azure Container Registry (build via `az acr build`)
+- Azure Storage Static Website hosting: Home Web + 3 product webapps
+
+Mermaid overview:
+
+```mermaid
+flowchart TB
+	U[User Browser] --> HWEB[Home Web\nAzure Storage Static Website]
+	U --> P1[Travel Web\nAzure Storage Static Website]
+	U --> P2[DSL Web\nAzure Storage Static Website]
+	U --> P3[Insurance Web\nAzure Storage Static Website]
+
+	HWEB -->|/api/home + /api/auth/handoff| HC[Home Core\nAzure Container App]
+	P1 -->|/api/auth/exchange| HC
+	P2 -->|/api/auth/exchange| HC
+	P3 -->|/api/auth/exchange| HC
+
+	P1 -->|/api/simulate/interest| SB1[Speedboat Travel\nAzure Container App]
+	P2 -->|/api/simulate/interest| SB2[Speedboat DSL\nAzure Container App]
+	P3 -->|/api/simulate/interest| SB3[Speedboat Insurance\nAzure Container App]
+
+	SB1 -->|/api/signals + /api/ingest| HC
+	SB2 -->|/api/signals + /api/ingest| HC
+	SB3 -->|/api/signals + /api/ingest| HC
+
+	HC --> R[(Azure Cache for Redis)]
+	HC --> M[(MongoDB Atlas\nexternal)]
+```
 
 ## Configuration (Home Core)
 

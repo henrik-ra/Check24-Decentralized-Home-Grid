@@ -7,6 +7,8 @@ This document describes how decentralized product teams ("speedboats") integrate
 - Products **push** user- or segment-specific widget snapshots to the Home Core ingest endpoint.
 - Home clients (Web/Android/iOS) only call the Home Core read endpoint.
 
+Additionally, product webapps can use a PoC cross-origin SSO flow (handoff/exchange) to obtain a JWT without re-entering email.
+
 ## Endpoints
 
 ### Write path: `POST /api/ingest`
@@ -69,11 +71,30 @@ Returns `widgets[]` already sorted by priority.
 	- `meta.reason`: e.g. `redis_unavailable`
 	- `meta.source`: `lkg` (last known good, in-memory) or `empty`
 
+### Cross-origin SSO (PoC)
+
+This PoC includes a simple, short-lived one-time code flow stored in Redis.
+
+- `POST /api/auth/handoff`
+	- Called by **Home Web**.
+	- Requires `Authorization: Bearer <JWT>`.
+	- Returns `{ code, expiresInSeconds }`.
+
+- `POST /api/auth/exchange`
+	- Called by **product webapps**.
+	- Body: `{ "code": "..." }`
+	- Returns `{ token, user }` where `user.email` is the JWT subject.
+
+Troubleshooting note:
+- If Redis does not support `GETDEL`, exchange falls back to `GET` + `DEL` (best-effort).
+
 ## Configuration
 
 ### Home Core environment variables
 - `REDIS_URL` (default: `redis://localhost:6379`)
 - `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
+ - `INGEST_KEY_DSL` (default: `dev-secret-123`)
+ - `INGEST_KEY_INSURANCE` (default: `dev-secret-123`)
 
 Optional auth (MongoDB + JWT):
 - `MONGODB_URI` (unset -> `/api/auth/*` disabled)
@@ -96,18 +117,26 @@ Read-path resilience (PoC):
 - `LKG_MAX_ENTRIES` (default: `5000`)
 
 ### Speedboat environment variables (example service)
-- `CORE_URL` (default: `http://localhost:3000`)
-- `PRODUCT_ID` (default: `travel`)
-- `INGEST_API_KEY` (default: `dev-secret-123`)
-- `USER_IDS` (default: `1,2`)
-- `WIDGET_ID` (default: `travel.hero.v1`)
-- `PUSH_INTERVAL_MS` (default: `5000`)
+- `CORE_URL` (default: `http://localhost:3000`) – Home Core base URL
+- `PRODUCT_ID` (default varies per service) – used as `x-product-id`
+- `INGEST_API_KEY` (default: `dev-secret-123`) – must match `INGEST_KEY_<PRODUCT>` on Home Core
+- `PRODUCT_WEB_URL` (optional) – used to create web deeplinks like `${PRODUCT_WEB_URL}/offer/<id>`
+- `PUSH_INTERVAL_MS` (default: `5000`) – demo periodic push interval
+
+### Product webapps environment variables (Vite)
+- `VITE_SPEEDBOAT_URL` – speedboat base URL
+- `VITE_HOME_URL` – Home Web URL (for navigation)
+- `VITE_CORE_URL` – Home Core base URL (used for `POST /api/auth/exchange`)
 
 ## Local testing
 
 ### Option A: Docker Compose (recommended)
 From the `check24-challenge-poc` folder:
 - `docker compose -f infra/docker-compose.yml up --build`
+
+Then:
+- Start Home Web (`frontend-web`) and any product web (`frontend-products/*`).
+- Navigate from Home to product pages using the SSO handoff flow.
 
 ### Option B: Run services manually (no Docker)
 You need a Redis instance reachable at `REDIS_URL`.
@@ -210,3 +239,17 @@ Invoke-RestMethod `
 
 - If ingest hits `429` quickly while testing manually: the demo speedboat is also writing ingests. Stop it temporarily with `docker stop infra-speedboat-travel-1`.
 - If Android cannot reach localhost: use emulator host mapping `http://10.0.2.2:3000/` (debug build allows cleartext HTTP).
+
+### Common SSO issue on product pages: `SSO exchange failed: 503 - {"error":"Auth unavailable"}`
+This means the product webapp successfully loaded, but Home Core could not complete the exchange.
+Typical causes:
+- Home Core cannot reach Redis (handoff codes are stored in Redis)
+- Redis command support mismatch (e.g. `GETDEL`), mitigated in this repo by a `GET` + `DEL` fallback
+
+Validate:
+- Home Core health: `GET /health`
+- Redis connectivity from Home Core logs
+
+### Mock images not loading
+If external placeholder image hosts are blocked (DNS/adblock/proxy), switch to inline `data:image/svg+xml` URLs.
+This repo uses inline SVG data URLs for mock images to avoid external dependencies.

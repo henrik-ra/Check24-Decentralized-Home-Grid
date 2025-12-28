@@ -7,6 +7,11 @@ This repository demonstrates a **push-based snapshot** Home Widgets platform:
 - The Home read-path (`GET /api/home`) reads only from Home-controlled storage (Redis) and degrades gracefully on outages.
 - Web and Android clients render the same SDUI component payload.
 
+Additionally, the PoC includes:
+- Cross-origin SSO (handoff/exchange) from Home → product sites.
+- 5 mock offers per product site; clicks are counted per offer and surfaced as product-specific “Personalized hint” widgets on Home.
+- Mock images embedded as inline SVG `data:` URLs (no external image host required).
+
 ## Repository structure
 - `services/home-core`: Home Core API (Fastify + Redis)
 - `services/speedboat-travel`: Travel speedboat that pushes snapshots
@@ -80,9 +85,15 @@ Each product site runs independently (like separate subdomains in production):
 cd frontend-products/travel-web
 $env:VITE_SPEEDBOAT_URL = "http://localhost:3001"
 $env:VITE_HOME_URL = "http://localhost:5173"
+$env:VITE_CORE_URL = "http://localhost:3000"
 npm install
 npm run dev
 ```
+
+SSO flow (local):
+- Log in on Home Web.
+- Navigate to a product site using the Home UI (it will append `?handoff=...`).
+- The product site exchanges the code for a JWT automatically.
 
 ## Azure deploy (IaC)
 
@@ -126,6 +137,9 @@ $env:VITE_API_BASE_URL = "https://<your-containerapp-fqdn>"
 npm install
 npm run dev
 ```
+
+Note for product webapps in Azure:
+- `VITE_CORE_URL` must point to the Home Core Container App URL so SSO exchange works.
 
 ## Android client
 

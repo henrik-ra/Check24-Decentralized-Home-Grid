@@ -179,7 +179,7 @@ export function App() {
                   <Flex direction="column" gap="4">
                     <Flex direction="column" gap="1">
                       <img
-                        src={svgDataUrl({ text: 'CHECK24 Mock', width: 640, height: 160 })}
+                        src="https://images.unsplash.com/photo-1551434678-e076c223a692?w=640&h=160&fit=crop"
                         alt=""
                         style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 12 }}
                       />
@@ -267,7 +267,7 @@ export function App() {
             <Flex align="center" gap="4" wrap="wrap">
               <Flex align="center" gap="2">
                 <img
-                  src={svgDataUrl({ text: 'C24', width: 64, height: 64 })}
+                  src="https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=48&h=48&fit=crop"
                   alt=""
                   style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover' }}
                 />
@@ -311,9 +311,13 @@ export function App() {
           <Flex direction="column" gap="4">
             <Flex direction="column" gap="1">
               <Heading size="6">Dein Home</Heading>
-              <Text color="gray" size="2">
-                Push-basierte Widgets mit Baseline-on-read (min. 3) und Signalen.
-              </Text>
+                {data?.welcomeText ? (
+                  <Text size="3">{data.welcomeText}</Text>
+                ) : (
+                  <Text color="gray" size="2">
+                    Push-basierte Widgets mit Baseline-on-read (min. 3) und Signalen.
+                  </Text>
+                )}
             </Flex>
 
             <Flex gap="2" align="center" wrap="wrap">

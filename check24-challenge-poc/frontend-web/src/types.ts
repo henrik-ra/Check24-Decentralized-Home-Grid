@@ -21,5 +21,6 @@ export type HomeResponse = {
   schemaVersion: string;
   generatedAt: string;
   greeting: string;
+  welcomeText?: string;
   widgets: HomeWidget[];
 };
