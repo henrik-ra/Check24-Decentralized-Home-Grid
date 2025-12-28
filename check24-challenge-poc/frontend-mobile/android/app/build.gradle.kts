@@ -19,7 +19,9 @@ android {
     debug {
       // Local dev: allow cleartext traffic to reach the host machine from the emulator.
       manifestPlaceholders["usesCleartextTraffic"] = "true"
-      buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:3000/\"")
+      val overrideUrl = (project.findProperty("API_BASE_URL") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+      val baseUrl = overrideUrl ?: "http://10.0.2.2:3000/"
+      buildConfigField("String", "API_BASE_URL", "\"$baseUrl\"")
     }
 
     release {
@@ -27,7 +29,9 @@ android {
       // If you ever create a real release build, set this to your HTTPS endpoint.
       manifestPlaceholders["usesCleartextTraffic"] = "false"
       isMinifyEnabled = false
-      buildConfigField("String", "API_BASE_URL", "\"https://example.com/\"")
+      val overrideUrl = (project.findProperty("API_BASE_URL") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+      val baseUrl = overrideUrl ?: "https://example.com/"
+      buildConfigField("String", "API_BASE_URL", "\"$baseUrl\"")
     }
   }
 
@@ -71,4 +75,6 @@ dependencies {
   implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
   implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
   implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+  implementation("io.coil-kt:coil-compose:2.7.0")
 }

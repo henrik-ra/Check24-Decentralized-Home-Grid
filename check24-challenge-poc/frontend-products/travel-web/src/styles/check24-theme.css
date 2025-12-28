@@ -1,0 +1,187 @@
+/* CHECK24 Brand Colors & Theme */
+:root {
+  /* CHECK24 Primary Colors */
+  --check24-blue: #0066CC;
+  --check24-blue-dark: #0052A3;
+  --check24-blue-light: #E6F2FF;
+  --check24-green: #00A651;
+  --check24-green-dark: #008542;
+  --check24-orange: #FF6600;
+  
+  /* Semantic Colors */
+  --c24-price-color: var(--check24-blue);
+  --c24-cta-color: var(--check24-blue);
+  --c24-badge-personalized: #7C3AED;
+  --c24-badge-bestseller: var(--check24-orange);
+  --c24-badge-premium: #F59E0B;
+  
+  /* Shadows */
+  --c24-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --c24-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --c24-shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.12);
+  
+  /* Spacing */
+  --c24-spacing-xs: 8px;
+  --c24-spacing-sm: 12px;
+  --c24-spacing-md: 16px;
+  --c24-spacing-lg: 24px;
+  --c24-spacing-xl: 32px;
+}
+
+/* CHECK24-style Header */
+.c24-header {
+  background: linear-gradient(135deg, var(--check24-blue) 0%, var(--check24-blue-dark) 100%);
+  color: white;
+  padding: var(--c24-spacing-lg) 0;
+  box-shadow: var(--c24-shadow-md);
+}
+
+.c24-header-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.c24-header-subtitle {
+  font-size: 16px;
+  opacity: 0.95;
+  margin-top: 4px;
+}
+
+/* CHECK24-style Offer Card */
+.c24-offer-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: var(--c24-shadow-md);
+  overflow: hidden;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.c24-offer-card:hover {
+  box-shadow: var(--c24-shadow-lg);
+  transform: translateY(-2px);
+  border-color: var(--check24-blue-light);
+}
+
+.c24-offer-image {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
+.c24-offer-content {
+  padding: var(--c24-spacing-md);
+}
+
+.c24-offer-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 var(--c24-spacing-xs) 0;
+}
+
+.c24-offer-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin: 0 0 var(--c24-spacing-md) 0;
+}
+
+.c24-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: var(--c24-spacing-md) 0;
+}
+
+.c24-price-label {
+  font-size: 14px;
+  color: #666;
+}
+
+.c24-price-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--c24-price-color);
+}
+
+.c24-price-unit {
+  font-size: 16px;
+  color: var(--c24-price-color);
+}
+
+.c24-cta-button {
+  width: 100%;
+  background: var(--c24-cta-color);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.c24-cta-button:hover {
+  background: var(--check24-blue-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+}
+
+/* Badge Styles */
+.c24-badge-personalized {
+  background: var(--c24-badge-personalized);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.c24-badge-category {
+  background: #F3F4F6;
+  color: #666;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Stats Bar */
+.c24-stats-bar {
+  background: white;
+  border-radius: 12px;
+  padding: var(--c24-spacing-lg);
+  box-shadow: var(--c24-shadow-sm);
+  display: flex;
+  gap: var(--c24-spacing-xl);
+  flex-wrap: wrap;
+  margin: var(--c24-spacing-lg) 0;
+}
+
+.c24-stat-item {
+  display: flex;
+  align-items: center;
+  gap: var(--c24-spacing-sm);
+}
+
+.c24-stat-icon {
+  color: var(--check24-blue);
+  font-size: 24px;
+}
+
+.c24-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.c24-stat-label {
+  font-size: 14px;
+  color: #666;
+}

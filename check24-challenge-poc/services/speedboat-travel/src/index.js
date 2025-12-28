@@ -9,7 +9,7 @@ const pushIntervalMs = Number.parseInt(process.env.PUSH_INTERVAL_MS || '5000', 1
 const productId = String(process.env.PRODUCT_ID || 'travel').trim().toLowerCase();
 const productWebUrl = String(process.env.PRODUCT_WEB_URL || '').trim().replace(/\/$/, '');
 
-// Map<email, Map<vertical, { totalCount: number, lastOfferId: string, offerCounts: Map<string, number> }>>
+// Map<email, Map<vertical, { totalCount: number, lastOfferId: string, lastOfferTitle?: string, lastOfferSubtitle?: string, offerCounts: Map<string, number>, offerTitles?: Map<string, string>, offerSubtitles?: Map<string, string> }>>
 const clickCounts = new Map();
 
 fastify.register(require('@fastify/cors'), {
@@ -82,7 +82,7 @@ function buildOfferDeeplink(vertical, offerId) {
   return `check24://${v}/offer/${id}`;
 }
 
-function incClickCount(email, vertical, offerId) {
+function incClickCount(email, vertical, offerId, offerTitle, offerSubtitle) {
   const v = normalizeVertical(vertical);
   const id = String(offerId || '123').trim() || '123';
   if (!clickCounts.has(email)) clickCounts.set(email, new Map());
@@ -91,12 +91,34 @@ function incClickCount(email, vertical, offerId) {
   const existing = perVertical.get(v) || { totalCount: 0, lastOfferId: id, offerCounts: new Map() };
   existing.totalCount = (existing.totalCount || 0) + 1;
   existing.lastOfferId = id;
+  if (typeof offerTitle === 'string' && offerTitle.trim()) {
+    if (!existing.offerTitles) existing.offerTitles = new Map();
+    existing.offerTitles.set(id, offerTitle.trim());
+    existing.lastOfferTitle = offerTitle.trim();
+  }
+  if (typeof offerSubtitle === 'string' && offerSubtitle.trim()) {
+    if (!existing.offerSubtitles) existing.offerSubtitles = new Map();
+    existing.offerSubtitles.set(id, offerSubtitle.trim());
+    existing.lastOfferSubtitle = offerSubtitle.trim();
+  }
   if (!existing.offerCounts) existing.offerCounts = new Map();
   const nextOffer = (existing.offerCounts.get(id) || 0) + 1;
   existing.offerCounts.set(id, nextOffer);
 
   perVertical.set(v, existing);
-  return { vertical: v, offerId: id, offerClicks: nextOffer, totalClicks: existing.totalCount };
+  const titleFromMap = existing.offerTitles ? existing.offerTitles.get(id) : undefined;
+  const subtitleFromMap = existing.offerSubtitles ? existing.offerSubtitles.get(id) : undefined;
+  const resolvedOfferTitle = typeof offerTitle === 'string' && offerTitle.trim() ? offerTitle.trim() : titleFromMap;
+  const resolvedOfferSubtitle =
+    typeof offerSubtitle === 'string' && offerSubtitle.trim() ? offerSubtitle.trim() : subtitleFromMap;
+  return {
+    vertical: v,
+    offerId: id,
+    offerTitle: resolvedOfferTitle,
+    offerSubtitle: resolvedOfferSubtitle,
+    offerClicks: nextOffer,
+    totalClicks: existing.totalCount,
+  };
 }
 
 async function sendSignal({ userId, productId, weight }) {
@@ -118,7 +140,7 @@ async function sendSignal({ userId, productId, weight }) {
   }
 }
 
-async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks }) {
+async function pushWidget({ userId, vertical, offerId, offerTitle, offerSubtitle, offerClicks, totalClicks }) {
   const template = WIDGET_TEMPLATES[vertical];
   if (!template) return;
 
@@ -131,13 +153,15 @@ async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks 
   // CompactRow is reserved for Home-Core baseline fillers.
   const widgetId = `${vertical}.primary.v1`;
   const offerLabel = String(offerId || '123');
+  const offerDisplayTitle = typeof offerTitle === 'string' && offerTitle.trim() ? offerTitle.trim() : '';
+  const offerDisplaySubtitle = typeof offerSubtitle === 'string' && offerSubtitle.trim() ? offerSubtitle.trim() : '';
   const hintImageUrl = 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=640&h=160&fit=crop';
   const components = [
     {
       type: 'HeroBanner',
       props: {
-        title: `${template.title} für dich`,
-        subtitle: template.subtitle,
+        title: `${offerDisplayTitle || template.title} für dich`,
+        subtitle: offerDisplaySubtitle || template.subtitle,
         price: `${price} €`,
         imageUrl: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=150&h=150&fit=crop',
         cta: { label: template.cta, action: 'deeplink', deeplink: buildOfferDeeplink(vertical, offerId) },
@@ -147,8 +171,8 @@ async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks 
       type: 'TextCard',
       props: {
         label: 'Personalized hint',
-        title: `Warum ${template.title}?`,
-        text: `Du hast Angebot #${offerLabel} in ${vertical.toUpperCase()} ${intensity}x angeklickt (gesamt ${total} Klicks).`,
+        title: `Warum ${offerDisplayTitle || template.title}?`,
+        text: `Du hast ${offerDisplayTitle ? `"${offerDisplayTitle}"` : `Angebot #${offerLabel}`} in ${vertical.toUpperCase()} ${intensity}x angeklickt (gesamt ${total} Klicks).`,
         imageUrl: hintImageUrl,
       },
     },
@@ -165,6 +189,8 @@ async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks 
         price: `${price} €`,
         intensity,
         offerId: offerLabel,
+        offerTitle: offerDisplayTitle || undefined,
+        offerSubtitle: offerDisplaySubtitle || undefined,
         totalClicks: total,
       },
     },
@@ -186,16 +212,42 @@ async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks 
 }
 
 fastify.post('/api/simulate/interest', async (request, reply) => {
-  const { email, vertical, offerId } = request.body || {};
+  const { email, vertical, offerId, offerTitle, offerSubtitle } = request.body || {};
   if (!email) return reply.code(400).send({ error: 'email required' });
 
-  const { vertical: v, offerId: id, offerClicks, totalClicks } = incClickCount(email, vertical, offerId);
-  fastify.log.info({ email, vertical: v, offerId: id, offerClicks, totalClicks }, 'User showed interest');
+  const { vertical: v, offerId: id, offerTitle: title, offerSubtitle: subtitle, offerClicks, totalClicks } = incClickCount(
+    email,
+    vertical,
+    offerId,
+    offerTitle,
+    offerSubtitle
+  );
+  fastify.log.info(
+    { email, vertical: v, offerId: id, offerTitle: title, offerSubtitle: subtitle, offerClicks, totalClicks },
+    'User showed interest'
+  );
 
   await sendSignal({ userId: email, productId: v.toUpperCase(), weight: 1 });
-  await pushWidget({ userId: email, vertical: v, offerId: id, offerClicks, totalClicks });
+  await pushWidget({
+    userId: email,
+    vertical: v,
+    offerId: id,
+    offerTitle: title,
+    offerSubtitle: subtitle,
+    offerClicks,
+    totalClicks,
+  });
 
-  return reply.send({ status: 'interest_registered', email, vertical: v, offerId: id, offerClicks, totalClicks });
+  return reply.send({
+    status: 'interest_registered',
+    email,
+    vertical: v,
+    offerId: id,
+    offerTitle: title,
+    offerSubtitle: subtitle,
+    offerClicks,
+    totalClicks,
+  });
 });
 
 fastify.get('/health', async () => {
@@ -209,6 +261,8 @@ fastify.get('/health', async () => {
           {
             totalClicks: state.totalCount || 0,
             lastOfferId: state.lastOfferId,
+            lastOfferTitle: state.lastOfferTitle,
+            lastOfferSubtitle: state.lastOfferSubtitle,
             offers: Object.fromEntries(Array.from((state.offerCounts || new Map()).entries())),
           },
         ])

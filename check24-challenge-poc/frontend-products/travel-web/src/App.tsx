@@ -1,6 +1,6 @@
 import { Badge, Box, Button, Card, Container, Flex, Heading, Text, TextField } from '@radix-ui/themes';
 import { PersonIcon } from '@radix-ui/react-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const TOKEN_STORAGE_KEY = 'c24_token';
 const USER_STORAGE_KEY = 'c24_user';
@@ -82,31 +82,31 @@ export function App() {
     () => [
       {
         id: '101',
-        title: 'Speedboat City Break (3 Tage)',
+        title: 'Paris City Trip (3 Tage)',
         subtitle: 'ab 199€ · inkl. Hotel & Flug',
   		imageUrl: 'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=640&h=360&fit=crop',
       },
       {
         id: '102',
-        title: 'Speedboat Strandurlaub (7 Tage)',
+        title: 'Mallorca Strandurlaub (7 Tage)',
         subtitle: 'ab 599€ · All Inclusive',
   		imageUrl: 'https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=640&h=360&fit=crop',
       },
       {
         id: '103',
-        title: 'Speedboat Rundreise (10 Tage)',
+        title: 'Italien Rundreise (10 Tage)',
         subtitle: 'ab 899€ · geführte Tour',
   		imageUrl: 'https://images.unsplash.com/photo-1601581987809-a874a81309c9?w=640&h=360&fit=crop',
       },
       {
         id: '104',
-        title: 'Speedboat Familienpaket (5 Tage)',
+        title: 'Familienpaket Gardasee (5 Tage)',
         subtitle: 'ab 449€ · Kids inklusive',
   		imageUrl: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=640&h=360&fit=crop',
       },
       {
         id: '105',
-        title: 'Speedboat Luxus-Upgrade (4 Tage)',
+        title: 'Dubai Luxus-Upgrade (4 Tage)',
         subtitle: 'ab 999€ · Premium Suite',
   		imageUrl: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=640&h=360&fit=crop',
       },
@@ -119,6 +119,8 @@ export function App() {
   const [email, setEmail] = useState(() => loadUser()?.email ?? 'demo@example.com');
   const [isSending, setIsSending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const lastAutoSignaledOfferIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -149,20 +151,29 @@ export function App() {
     };
   }, [coreUrl]);
 
-  const simulateInterest = async (clickedOfferId?: string, options?: { keepalive?: boolean; silent?: boolean }) => {
+  const simulateInterest = async (
+    clickedOffer?: { offerId?: string; offerTitle?: string; offerSubtitle?: string },
+    options?: { keepalive?: boolean; silent?: boolean }
+  ) => {
     const effectiveEmail = (user?.email ?? email).trim();
     if (!effectiveEmail) {
       setMessage('Bitte E-Mail eingeben.');
       return;
     }
 
-    setIsSending(true);
+    if (!options?.silent) setIsSending(true);
     if (!options?.silent) setMessage(null);
     try {
       const response = await fetch(`${speedboatUrl}/api/simulate/interest`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: effectiveEmail, vertical: 'travel', offerId: clickedOfferId }),
+        body: JSON.stringify({
+          email: effectiveEmail,
+          vertical: 'travel',
+          offerId: clickedOffer?.offerId,
+          offerTitle: clickedOffer?.offerTitle,
+          offerSubtitle: clickedOffer?.offerSubtitle,
+        }),
         keepalive: Boolean(options?.keepalive),
       });
 
@@ -175,13 +186,23 @@ export function App() {
     } catch (e: any) {
       if (!options?.silent) setMessage(e?.message ?? 'Netzwerkfehler');
     } finally {
-      setIsSending(false);
+      if (!options?.silent) setIsSending(false);
     }
   };
 
+  // If the user deep-links directly to /offer/:id, also signal interest once (silent).
+  useEffect(() => {
+    if (!offerId) return;
+    if (lastAutoSignaledOfferIdRef.current === offerId) return;
+    lastAutoSignaledOfferIdRef.current = offerId;
+    const offer = offers.find((o) => o.id === offerId);
+    void simulateInterest({ offerId, offerTitle: offer?.title, offerSubtitle: offer?.subtitle }, { silent: true });
+  }, [offerId, user?.email]);
+
   const openOffer = (id: string) => {
     // Fire-and-forget interest signal; keepalive helps during navigation.
-    void simulateInterest(id, { keepalive: true, silent: true });
+    const offer = offers.find((o) => o.id === id);
+    void simulateInterest({ offerId: id, offerTitle: offer?.title, offerSubtitle: offer?.subtitle }, { keepalive: true, silent: true });
     window.location.href = `/offer/${id}`;
   };
 
@@ -223,7 +244,7 @@ export function App() {
             <Flex direction="column" gap="3">
               <Heading size="5">{offerId ? `Angebot ${offerId}` : 'Travel Angebote'}</Heading>
               <Text size="2" color="gray">
-                Minimaler Product-Site-PoC: sendet ein Interest-Signal an die Travel-Speedboat und pusht ein Widget in Home.
+                Minimaler Product-Site-PoC: signalisiert Interesse automatisch beim Klick auf ein Angebot und pusht ein Widget in Home.
               </Text>
 
               {user?.email ? (
@@ -244,9 +265,6 @@ export function App() {
               )}
 
               <Flex gap="2" wrap="wrap">
-                <Button onClick={() => simulateInterest(offerId ?? undefined)} disabled={isSending}>
-                  {isSending ? 'Sende…' : 'Interesse signalisieren'}
-                </Button>
                 {homeUrl ? (
                   <Button
                     variant="soft"

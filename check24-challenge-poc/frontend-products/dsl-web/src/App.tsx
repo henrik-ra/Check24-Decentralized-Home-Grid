@@ -1,6 +1,6 @@
 import { Badge, Box, Button, Card, Container, Flex, Heading, Text, TextField } from '@radix-ui/themes';
 import { PersonIcon } from '@radix-ui/react-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const TOKEN_STORAGE_KEY = 'c24_token';
 const USER_STORAGE_KEY = 'c24_user';
@@ -120,6 +120,8 @@ export function App() {
   const [isSending, setIsSending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const lastAutoSignaledOfferIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const handoff = params.get('handoff');
@@ -149,20 +151,29 @@ export function App() {
     };
   }, [coreUrl]);
 
-  const simulateInterest = async (clickedOfferId?: string, options?: { keepalive?: boolean; silent?: boolean }) => {
+  const simulateInterest = async (
+    clickedOffer?: { offerId?: string; offerTitle?: string; offerSubtitle?: string },
+    options?: { keepalive?: boolean; silent?: boolean }
+  ) => {
     const effectiveEmail = (user?.email ?? email).trim();
     if (!effectiveEmail) {
       setMessage('Bitte E-Mail eingeben.');
       return;
     }
 
-    setIsSending(true);
+    if (!options?.silent) setIsSending(true);
     if (!options?.silent) setMessage(null);
     try {
       const response = await fetch(`${speedboatUrl}/api/simulate/interest`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: effectiveEmail, vertical: 'dsl', offerId: clickedOfferId }),
+        body: JSON.stringify({
+          email: effectiveEmail,
+          vertical: 'dsl',
+          offerId: clickedOffer?.offerId,
+          offerTitle: clickedOffer?.offerTitle,
+          offerSubtitle: clickedOffer?.offerSubtitle,
+        }),
         keepalive: Boolean(options?.keepalive),
       });
 
@@ -175,12 +186,22 @@ export function App() {
     } catch (e: any) {
       if (!options?.silent) setMessage(e?.message ?? 'Netzwerkfehler');
     } finally {
-      setIsSending(false);
+      if (!options?.silent) setIsSending(false);
     }
   };
 
+  // If the user deep-links directly to /offer/:id, also signal interest once (silent).
+  useEffect(() => {
+    if (!offerId) return;
+    if (lastAutoSignaledOfferIdRef.current === offerId) return;
+    lastAutoSignaledOfferIdRef.current = offerId;
+    const offer = offers.find((o) => o.id === offerId);
+    void simulateInterest({ offerId, offerTitle: offer?.title, offerSubtitle: offer?.subtitle }, { silent: true });
+  }, [offerId, user?.email]);
+
   const openOffer = (id: string) => {
-    void simulateInterest(id, { keepalive: true, silent: true });
+    const offer = offers.find((o) => o.id === id);
+    void simulateInterest({ offerId: id, offerTitle: offer?.title, offerSubtitle: offer?.subtitle }, { keepalive: true, silent: true });
     window.location.href = `/offer/${id}`;
   };
 
@@ -222,7 +243,7 @@ export function App() {
             <Flex direction="column" gap="3">
               <Heading size="5">{offerId ? `Tarif ${offerId}` : 'DSL Tarife'}</Heading>
               <Text size="2" color="gray">
-                Minimaler Product-Site-PoC: sendet ein Interest-Signal an die DSL-Speedboat und pusht ein Widget in Home.
+                Minimaler Product-Site-PoC: signalisiert Interesse automatisch beim Klick auf ein Angebot und pusht ein Widget in Home.
               </Text>
 
               {user?.email ? (
@@ -243,9 +264,6 @@ export function App() {
               )}
 
               <Flex gap="2" wrap="wrap">
-                <Button onClick={() => simulateInterest(offerId ?? undefined)} disabled={isSending}>
-                  {isSending ? 'Sende…' : 'Interesse signalisieren'}
-                </Button>
                 {homeUrl ? (
                   <Button
                     variant="soft"
