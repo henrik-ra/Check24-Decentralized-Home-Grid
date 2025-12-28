@@ -6,6 +6,9 @@ const coreUrl = (process.env.CORE_URL || 'http://localhost:3000').replace(/\/$/,
 const ingestApiKey = process.env.INGEST_API_KEY || 'dev-secret-123';
 const pushIntervalMs = Number.parseInt(process.env.PUSH_INTERVAL_MS || '5000', 10);
 
+const productId = String(process.env.PRODUCT_ID || 'travel').trim().toLowerCase();
+const productWebUrl = String(process.env.PRODUCT_WEB_URL || '').trim().replace(/\/$/, '');
+
 // Map<email, Map<vertical, clickCount>>
 const clickCounts = new Map();
 
@@ -60,7 +63,13 @@ const WIDGET_TEMPLATES = {
 
 function normalizeVertical(vertical) {
   const v = String(vertical || '').trim().toLowerCase();
-  return v || 'travel';
+  return v || productId;
+}
+
+function buildOfferDeeplink(vertical) {
+  const v = normalizeVertical(vertical);
+  if (productWebUrl && v === productId) return `${productWebUrl}/offer/123`;
+  return `check24://${v}/offer/123`;
 }
 
 function incClickCount(email, vertical) {
@@ -110,7 +119,7 @@ async function pushWidget({ userId, vertical, clickCount }) {
         subtitle: template.subtitle,
         price: `${price} €`,
         imageUrl: `https://via.placeholder.com/150/${template.color.replace('#', '')}/ffffff?text=${vertical}`,
-        cta: { label: template.cta, action: 'deeplink', deeplink: `check24://${vertical}/offer/123` },
+        cta: { label: template.cta, action: 'deeplink', deeplink: buildOfferDeeplink(vertical) },
       },
     },
     {

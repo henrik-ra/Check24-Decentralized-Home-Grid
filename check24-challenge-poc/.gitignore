@@ -7,3 +7,5 @@ dist/
 *.iml
 build/
 .gradle/
+*.tsbuildinfo
+infra/azure/main.json

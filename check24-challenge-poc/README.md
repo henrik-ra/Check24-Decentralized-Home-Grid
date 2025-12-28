@@ -9,8 +9,11 @@ This repository demonstrates a **push-based snapshot** Home Widgets platform:
 
 ## Repository structure
 - `services/home-core`: Home Core API (Fastify + Redis)
-- `services/speedboat-travel`: Example speedboat that pushes snapshots
-- `frontend-web`: Web client (React + Vite + TypeScript)
+- `services/speedboat-travel`: Travel speedboat that pushes snapshots
+- `services/speedboat-dsl`: DSL speedboat that pushes snapshots
+- `services/speedboat-insurance`: Insurance speedboat that pushes snapshots
+- `frontend-web`: Home web client (React + Vite + TypeScript)
+- `frontend-products/*`: Product web clients (separate deployments)
 - `frontend-mobile/android`: Android client (Kotlin + Jetpack Compose)
 - `infra/docker-compose.yml`: Local dev stack (Redis + services)
 - `docs`: Architecture and integration docs
@@ -24,23 +27,33 @@ From this folder (`check24-challenge-poc`):
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+Local URLs:
+- Home Core: `http://localhost:3000`
+- Speedboat Travel: `http://localhost:3001`
+- Speedboat DSL: `http://localhost:3002`
+- Speedboat Insurance: `http://localhost:3003`
+
 Endpoints:
 - Health: `GET http://localhost:3000/health`
-- Home: `GET http://localhost:3000/api/home` (requires header `x-user-id`)
+- Home: `GET http://localhost:3000/api/home` (requires `Authorization: Bearer <JWT>`)
 - Ingest: `POST http://localhost:3000/api/ingest` (requires `x-product-id` + `x-api-key`)
 
 ### 1b) (Demo) Redis outage should not break Home
 This showcases **High Availability by Design**: Home stays available even if Redis is down.
 
 ```powershell
+# 0) Create a user and get a JWT
+$register = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/auth/register" -ContentType "application/json" -Body (@{ email = "demo@example.com"; password = "test1234" } | ConvertTo-Json)
+$token = $register.token
+
 # 1) Warm up: get a normal response
-Invoke-RestMethod -Uri "http://localhost:3000/api/home" -Headers @{ "x-user-id" = "1" } | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://localhost:3000/api/home" -Headers @{ Authorization = "Bearer $token" } | ConvertTo-Json -Depth 6
 
 # 2) Simulate outage
 docker compose -f infra/docker-compose.yml stop redis
 
 # 3) Home still returns 200, but includes meta.degraded
-Invoke-RestMethod -Uri "http://localhost:3000/api/home" -Headers @{ "x-user-id" = "1" } | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://localhost:3000/api/home" -Headers @{ Authorization = "Bearer $token" } | ConvertTo-Json -Depth 6
 
 # 4) Recover
 docker compose -f infra/docker-compose.yml up -d redis
@@ -56,14 +69,28 @@ npm run dev
 Web defaults to `http://localhost:3000` as API base.
 To point it elsewhere:
 - `VITE_API_BASE_URL=http://localhost:3000`
+- `VITE_TRAVEL_WEB_URL=http://localhost:5174`
+- `VITE_DSL_WEB_URL=http://localhost:5175`
+- `VITE_INSURANCE_WEB_URL=http://localhost:5176`
+
+### 3) Start a product site (separate webapp)
+Each product site runs independently (like separate subdomains in production):
+
+```powershell
+cd frontend-products/travel-web
+$env:VITE_SPEEDBOAT_URL = "http://localhost:3001"
+$env:VITE_HOME_URL = "http://localhost:5173"
+npm install
+npm run dev
+```
 
 ## Azure deploy (IaC)
 
 This repo includes a repeatable Azure deployment for:
-- Azure Container Apps (Home Core + demo speedboat)
+- Azure Container Apps (Home Core + 3 speedboats)
 - Azure Cache for Redis
 - Azure Container Registry (builds run via `az acr build`; no local Docker required)
-- Azure Storage static website hosting (web frontend)
+- Azure Storage static website hosting (Home + 3 product frontends)
 
 Prerequisites:
 - Azure CLI installed and logged in (`az login`)
@@ -74,7 +101,14 @@ Deploy:
 cd infra/azure
 
 # Clean setup: one ingest key per product.
-./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest -IngestKeyTravel "dev-secret-123" -MongoDbUri "<your-atlas-uri>" -JwtSecret "<strong-secret>" -DemoUserId "demo@example.com"
+
+# Prefer env vars for secrets to avoid leaking them in shell history.
+$env:MONGODB_URI = "<your-atlas-uri>"
+$env:JWT_SECRET = "<strong-secret>"
+
+./deploy.ps1 -ResourceGroupName rg-check24-home-core -Location westeurope -NamePrefix c24 -ImageTag latest `
+	-IngestKeyTravel "dev-secret-123" -IngestKeyDsl "dev-secret-123" -IngestKeyInsurance "dev-secret-123" `
+	-DemoUserId "demo@example.com"
 
 # Optional: override the demo speedboat key (defaults to -IngestKeyTravel)
 # ./deploy.ps1 ... -IngestKeyTravel "dev-secret-123" -SpeedboatIngestApiKey "dev-secret-123"
@@ -82,7 +116,8 @@ cd infra/azure
 
 After deploy, the script prints:
 - Public backend URL (Container App)
-- Public frontend URL (Azure Storage static website)
+- Public Home URL (Azure Storage static website)
+- Public product URLs (Travel/DSL/Insurance)
 
 Run the web client locally against the Azure API:
 ```powershell
@@ -107,8 +142,13 @@ Networking:
 Environment variables (defaults in parentheses):
 - `REDIS_URL` (`redis://localhost:6379`)
 - `INGEST_KEY_TRAVEL` (`dev-secret-123`)
-- `MONGODB_URI` (unset -> auth disabled)
-- `JWT_SECRET` (unset -> auth disabled)
+- `INGEST_KEY_DSL` (`dev-secret-123`)
+- `INGEST_KEY_INSURANCE` (`dev-secret-123`)
+- `TRAVEL_WEB_URL` (unset -> baseline falls back to `check24://...`)
+- `DSL_WEB_URL` (unset -> baseline falls back to `check24://...`)
+- `INSURANCE_WEB_URL` (unset -> baseline falls back to `check24://...`)
+- `MONGODB_URI` (unset -> `/api/auth/*` disabled; `/api/home` still requires a JWT issued elsewhere)
+- `JWT_SECRET` (**required**)
 - `JWT_EXPIRES_IN` (`7d`)
 - `MAX_INGEST_PAYLOAD_BYTES` (`65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (`120`)

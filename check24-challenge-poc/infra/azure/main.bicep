@@ -15,9 +15,25 @@ param imageTag string = 'latest'
 @secure()
 param ingestKeyTravel string
 
+@description('Ingest API key for the dsl product. The home-core expects this as env var INGEST_KEY_DSL.')
+@secure()
+param ingestKeyDsl string = ingestKeyTravel
+
+@description('Ingest API key for the insurance product. The home-core expects this as env var INGEST_KEY_INSURANCE.')
+@secure()
+param ingestKeyInsurance string = ingestKeyTravel
+
 @description('Ingest API key used by the speedboat-travel producer (should match ingestKeyTravel).')
 @secure()
 param speedboatIngestApiKey string = ''
+
+@description('Ingest API key used by the speedboat-dsl producer (should match ingestKeyDsl).')
+@secure()
+param speedboatDslIngestApiKey string = ''
+
+@description('Ingest API key used by the speedboat-insurance producer (should match ingestKeyInsurance).')
+@secure()
+param speedboatInsuranceIngestApiKey string = ''
 
 @description('MongoDB connection string (MongoDB Atlas) for user identity. If empty, auth endpoints are disabled.')
 @secure()
@@ -31,6 +47,8 @@ param jwtSecret string
 param demoUserId string = 'demo@example.com'
 
 var effectiveSpeedboatIngestApiKey = empty(speedboatIngestApiKey) ? ingestKeyTravel : speedboatIngestApiKey
+var effectiveSpeedboatDslIngestApiKey = empty(speedboatDslIngestApiKey) ? ingestKeyDsl : speedboatDslIngestApiKey
+var effectiveSpeedboatInsuranceIngestApiKey = empty(speedboatInsuranceIngestApiKey) ? ingestKeyInsurance : speedboatInsuranceIngestApiKey
 
 @description('CPU cores for the container app.')
 param containerCpu string = '0.5'
@@ -45,7 +63,14 @@ var redisName = toLower('${namePrefix}redis${unique}')
 var caeName = toLower('${namePrefix}-cae-${unique}')
 var appName = toLower('${namePrefix}-home-core-${unique}')
 var speedboatAppName = toLower('${namePrefix}-speedboat-travel-${unique}')
-var webStorageName = toLower('${namePrefix}web${unique}')
+var speedboatDslAppName = toLower('${namePrefix}-speedboat-dsl-${unique}')
+var speedboatInsuranceAppName = toLower('${namePrefix}-speedboat-insurance-${unique}')
+
+// Storage account names must be globally unique and <= 24 chars.
+var homeWebStorageName = toLower('${namePrefix}w${unique}h')
+var travelWebStorageName = toLower('${namePrefix}w${unique}t')
+var dslWebStorageName = toLower('${namePrefix}w${unique}d')
+var insuranceWebStorageName = toLower('${namePrefix}w${unique}i')
 
 // NOTE: We intentionally deploy the storage account as native resources (not AVM)
 // because the AVM module currently doesn't expose the blob static website settings.
@@ -53,8 +78,8 @@ var webStorageName = toLower('${namePrefix}web${unique}')
 // --------------------
 // Frontend static website hosting (Azure Storage)
 // --------------------
-resource webStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
-  name: webStorageName
+resource homeWebStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: homeWebStorageName
   location: location
   sku: {
     name: 'Standard_LRS'
@@ -73,14 +98,104 @@ resource webStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   }
 }
 
-resource webBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
-  parent: webStorage
+resource homeWebBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: homeWebStorage
   name: 'default'
   properties: {}
 }
 
-resource webContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
-  parent: webBlobService
+resource homeWebContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: homeWebBlobService
+  name: '$web'
+  properties: {
+    publicAccess: 'Blob'
+  }
+}
+
+resource travelWebStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: travelWebStorageName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource travelWebBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: travelWebStorage
+  name: 'default'
+  properties: {}
+}
+
+resource travelWebContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: travelWebBlobService
+  name: '$web'
+  properties: {
+    publicAccess: 'Blob'
+  }
+}
+
+resource dslWebStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: dslWebStorageName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource dslWebBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: dslWebStorage
+  name: 'default'
+  properties: {}
+}
+
+resource dslWebContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: dslWebBlobService
+  name: '$web'
+  properties: {
+    publicAccess: 'Blob'
+  }
+}
+
+resource insuranceWebStorage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: insuranceWebStorageName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource insuranceWebBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: insuranceWebStorage
+  name: 'default'
+  properties: {}
+}
+
+resource insuranceWebContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: insuranceWebBlobService
   name: '$web'
   properties: {
     publicAccess: 'Blob'
@@ -191,6 +306,14 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
         value: ingestKeyTravel
       }
       {
+        name: 'ingest-key-dsl'
+        value: ingestKeyDsl
+      }
+      {
+        name: 'ingest-key-insurance'
+        value: ingestKeyInsurance
+      }
+      {
         name: 'mongodb-uri'
         value: mongoDbUri
       }
@@ -234,6 +357,14 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
             secretRef: 'ingest-key-travel'
           }
           {
+            name: 'INGEST_KEY_DSL'
+            secretRef: 'ingest-key-dsl'
+          }
+          {
+            name: 'INGEST_KEY_INSURANCE'
+            secretRef: 'ingest-key-insurance'
+          }
+          {
             name: 'MONGODB_URI'
             secretRef: 'mongodb-uri'
           }
@@ -244,6 +375,19 @@ module containerApp 'br/public:avm/res/app/container-app:0.18.2' = {
           {
             name: 'JWT_EXPIRES_IN'
             value: '7d'
+          }
+          // Filled later by deploy.ps1 (after static sites exist)
+          {
+            name: 'TRAVEL_WEB_URL'
+            value: ''
+          }
+          {
+            name: 'DSL_WEB_URL'
+            value: ''
+          }
+          {
+            name: 'INSURANCE_WEB_URL'
+            value: ''
           }
         ]
       }
@@ -307,6 +451,11 @@ module speedboatContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
             name: 'PRODUCT_ID'
             value: 'travel'
           }
+          // Filled later by deploy.ps1 (after static site exists)
+          {
+            name: 'PRODUCT_WEB_URL'
+            value: ''
+          }
           {
             name: 'INGEST_API_KEY'
             secretRef: 'ingest-api-key'
@@ -314,6 +463,148 @@ module speedboatContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
           {
             name: 'USER_IDS'
             value: demoUserId
+          }
+          {
+            name: 'PUSH_INTERVAL_MS'
+            value: '5000'
+          }
+        ]
+      }
+    ]
+  }
+}
+
+module speedboatDslContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
+  name: 'speedboat-dsl-${unique}-${deployUnique}'
+  params: {
+    name: speedboatDslAppName
+    location: location
+    environmentResourceId: managedEnvironment.outputs.resourceId
+
+    ingressExternal: true
+    ingressTargetPort: 3000
+    ingressTransport: 'auto'
+
+    scaleSettings: {
+      minReplicas: 1
+      maxReplicas: 1
+    }
+
+    secrets: [
+      {
+        name: 'acr-pwd'
+        value: acrPassword
+      }
+      {
+        name: 'ingest-api-key'
+        value: effectiveSpeedboatDslIngestApiKey
+      }
+    ]
+
+    registries: [
+      {
+        server: acr.outputs.loginServer
+        username: acrUsername
+        passwordSecretRef: 'acr-pwd'
+      }
+    ]
+
+    containers: [
+      {
+        name: 'speedboat-dsl'
+        image: '${acr.outputs.loginServer}/speedboat-dsl:${imageTag}'
+        resources: {
+          cpu: '0.25'
+          memory: '0.5Gi'
+        }
+        env: [
+          {
+            name: 'CORE_URL'
+            value: 'https://${containerApp.outputs.fqdn}'
+          }
+          {
+            name: 'PRODUCT_ID'
+            value: 'dsl'
+          }
+          // Filled later by deploy.ps1 (after static site exists)
+          {
+            name: 'PRODUCT_WEB_URL'
+            value: ''
+          }
+          {
+            name: 'INGEST_API_KEY'
+            secretRef: 'ingest-api-key'
+          }
+          {
+            name: 'PUSH_INTERVAL_MS'
+            value: '5000'
+          }
+        ]
+      }
+    ]
+  }
+}
+
+module speedboatInsuranceContainerApp 'br/public:avm/res/app/container-app:0.18.2' = {
+  name: 'speedboat-insurance-${unique}-${deployUnique}'
+  params: {
+    name: speedboatInsuranceAppName
+    location: location
+    environmentResourceId: managedEnvironment.outputs.resourceId
+
+    ingressExternal: true
+    ingressTargetPort: 3000
+    ingressTransport: 'auto'
+
+    scaleSettings: {
+      minReplicas: 1
+      maxReplicas: 1
+    }
+
+    secrets: [
+      {
+        name: 'acr-pwd'
+        value: acrPassword
+      }
+      {
+        name: 'ingest-api-key'
+        value: effectiveSpeedboatInsuranceIngestApiKey
+      }
+    ]
+
+    registries: [
+      {
+        server: acr.outputs.loginServer
+        username: acrUsername
+        passwordSecretRef: 'acr-pwd'
+      }
+    ]
+
+    containers: [
+      {
+        name: 'speedboat-insurance'
+        image: '${acr.outputs.loginServer}/speedboat-insurance:${imageTag}'
+        resources: {
+          cpu: '0.25'
+          memory: '0.5Gi'
+        }
+        env: [
+          {
+            name: 'CORE_URL'
+            value: 'https://${containerApp.outputs.fqdn}'
+          }
+          {
+            name: 'PRODUCT_ID'
+            value: 'insurance'
+          }
+          // Filled later by deploy.ps1 (after static site exists)
+          {
+            name: 'PRODUCT_WEB_URL'
+            value: ''
+          }
+          {
+            name: 'INGEST_API_KEY'
+            secretRef: 'ingest-api-key'
           }
           {
             name: 'PUSH_INTERVAL_MS'
@@ -340,6 +631,18 @@ output speedboatContainerAppName string = speedboatContainerApp.outputs.name
 @description('Speedboat-travel public URL.')
 output speedboatUrl string = 'https://${speedboatContainerApp.outputs.fqdn}'
 
+@description('Speedboat-dsl Container App name.')
+output speedboatDslContainerAppName string = speedboatDslContainerApp.outputs.name
+
+@description('Speedboat-dsl public URL.')
+output speedboatDslUrl string = 'https://${speedboatDslContainerApp.outputs.fqdn}'
+
+@description('Speedboat-insurance Container App name.')
+output speedboatInsuranceContainerAppName string = speedboatInsuranceContainerApp.outputs.name
+
+@description('Speedboat-insurance public URL.')
+output speedboatInsuranceUrl string = 'https://${speedboatInsuranceContainerApp.outputs.fqdn}'
+
 @description('ACR name.')
 output acrName string = acr.outputs.name
 
@@ -353,4 +656,16 @@ output redisHostName string = redis.outputs.hostName
 output redisSslPort int = redis.outputs.sslPort
 
 @description('Frontend storage account name (static website).')
-output frontendStorageAccountName string = webStorage.name
+output frontendStorageAccountName string = homeWebStorage.name
+
+@description('Home frontend storage account name (static website).')
+output homeFrontendStorageAccountName string = homeWebStorage.name
+
+@description('Travel frontend storage account name (static website).')
+output travelFrontendStorageAccountName string = travelWebStorage.name
+
+@description('DSL frontend storage account name (static website).')
+output dslFrontendStorageAccountName string = dslWebStorage.name
+
+@description('Insurance frontend storage account name (static website).')
+output insuranceFrontendStorageAccountName string = insuranceWebStorage.name

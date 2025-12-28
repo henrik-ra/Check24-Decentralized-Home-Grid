@@ -36,7 +36,6 @@ This document describes the current Proof of Concept implementation for a person
 
 ### Read path (client → Home Core)
 1. Client calls `GET /api/home` with `Authorization: Bearer <JWT>`.
-	- PoC fallback (optional): if `ALLOW_X_USER_ID=true`, clients may send `x-user-id` instead.
 2. Home Core reads the per-user index set from Redis (**tight timeout / fail-fast**).
 3. Home Core uses a single `MGET` to load all snapshot payloads (**tight timeout / fail-fast**).
 4. Missing/expired payloads are removed from the index.
@@ -151,8 +150,8 @@ This PoC is intentionally simple, but the pattern scales:
 
 Home Core reads configuration from environment variables:
 - `REDIS_URL` (default: `redis://localhost:6379`)
-- `MONGODB_URI` (required for auth)
-- `JWT_SECRET` (required for auth)
+- `MONGODB_URI` (required for PoC `/api/auth/*` endpoints)
+- `JWT_SECRET` (required)
 - `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
 - `MAX_INGEST_PAYLOAD_BYTES` (default: `65536`)
 - `INGEST_RATE_LIMIT_PER_MINUTE` (default: `120`)

@@ -1,4 +1,13 @@
 services:
+  mongo:
+    image: mongo:6
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://localhost:27017/admin", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   redis:
     image: redis:alpine
     ports:
@@ -15,8 +24,11 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       INGEST_KEY_TRAVEL: dev-secret-123
-      MONGODB_URI: ${MONGODB_URI}
-      JWT_SECRET: ${JWT_SECRET}
+      INGEST_KEY_DSL: dev-secret-123
+      INGEST_KEY_INSURANCE: dev-secret-123
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
+      MONGODB_DB: ${MONGODB_DB:-check24-home}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-123}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       REDIS_READ_TIMEOUT_MS: "40"
       LKG_TTL_MS: "300000"
@@ -25,6 +37,8 @@ services:
       - "3000:3000"
     depends_on:
       redis:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -35,6 +49,32 @@ services:
       PRODUCT_ID: travel
       INGEST_API_KEY: dev-secret-123
       USER_IDS: demo@example.com
+    ports:
+      - "3001:3000"
+    depends_on:
+      - home-core
+    restart: unless-stopped
+
+  speedboat-dsl:
+    build: ../services/speedboat-dsl
+    environment:
+      CORE_URL: http://home-core:3000
+      PRODUCT_ID: dsl
+      INGEST_API_KEY: dev-secret-123
+    ports:
+      - "3002:3000"
+    depends_on:
+      - home-core
+    restart: unless-stopped
+
+  speedboat-insurance:
+    build: ../services/speedboat-insurance
+    environment:
+      CORE_URL: http://home-core:3000
+      PRODUCT_ID: insurance
+      INGEST_API_KEY: dev-secret-123
+    ports:
+      - "3003:3000"
     depends_on:
       - home-core
     restart: unless-stopped

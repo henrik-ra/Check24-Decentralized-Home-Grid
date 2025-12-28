@@ -2,6 +2,7 @@ import type { HomeWidget, SduiComponent } from '../types';
 import { CompactRow } from './CompactRow';
 import { HeroBanner } from './HeroBanner';
 import { TextCard } from './TextCard';
+import { WidgetCard } from './WidgetCard';
 
 type Props = {
   widgets: HomeWidget[];
@@ -10,11 +11,11 @@ type Props = {
 function renderComponent(component: SduiComponent) {
   switch (component.type) {
     case 'CompactRow':
-      return <CompactRow key={component.type + JSON.stringify(component.props ?? {})} component={component} />;
+      return <CompactRow component={component} />;
     case 'HeroBanner':
-      return <HeroBanner key={component.type + JSON.stringify(component.props ?? {})} component={component} />;
+      return <HeroBanner component={component} />;
     case 'TextCard':
-      return <TextCard key={component.type + JSON.stringify(component.props ?? {})} component={component} />;
+      return <TextCard component={component} />;
     default:
       return null;
   }
@@ -22,19 +23,14 @@ function renderComponent(component: SduiComponent) {
 
 export function WidgetRenderer({ widgets }: Props) {
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <>
       {widgets.map((widget) => (
-        <div key={`${widget.productId}:${widget.widgetId}`}>
-          {widget.meta?.isPersonalized === true ? (
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#6b21a8', marginBottom: 6 }}>
-              ✨ Für dich ausgewählt
-            </div>
-          ) : null}
+        <WidgetCard key={`${widget.productId}:${widget.widgetId}`} widget={widget}>
           {widget.components.map((component, index) => (
-            <div key={`${widget.productId}:${widget.widgetId}:${component.type}:${index}`}>{renderComponent(component)}</div>
+            <div key={`${component.type}:${index}`}>{renderComponent(component)}</div>
           ))}
-        </div>
+        </WidgetCard>
       ))}
-    </div>
+    </>
   );
 }

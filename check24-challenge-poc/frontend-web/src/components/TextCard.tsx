@@ -1,4 +1,5 @@
 import type { SduiComponent } from '../types';
+import { Flex, Text } from '@radix-ui/themes';
 
 type Props = {
   component: SduiComponent;
@@ -11,10 +12,20 @@ export function TextCard({ component }: Props) {
   const label = typeof props.label === 'string' ? props.label : undefined;
 
   return (
-    <section style={{ border: '1px solid #ddd', borderRadius: 8, padding: 16 }}>
-      {label ? <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{label}</div> : null}
-      <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
-      {text ? <div style={{ marginTop: 6, opacity: 0.9 }}>{text}</div> : null}
-    </section>
+    <Flex direction="column" gap="2">
+      {label ? (
+        <Text size="1" color="gray" weight="bold" style={{ letterSpacing: 0.2, textTransform: 'uppercase' }}>
+          {label}
+        </Text>
+      ) : null}
+      <Text size="3" weight="bold">
+        {title}
+      </Text>
+      {text ? (
+        <Text size="2" color="gray">
+          {text}
+        </Text>
+      ) : null}
+    </Flex>
   );
 }

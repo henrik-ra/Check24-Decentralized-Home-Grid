@@ -1,4 +1,6 @@
 import type { SduiComponent } from '../types';
+import { Box, Button, Flex, Heading, Text } from '@radix-ui/themes';
+import { navigateWithSso } from '../sso';
 
 type Props = {
   component: SduiComponent;
@@ -15,26 +17,61 @@ export function HeroBanner({ component }: Props) {
   const ctaDeeplink = cta && typeof cta.deeplink === 'string' ? cta.deeplink : undefined;
 
   return (
-    <section style={{ border: '1px solid #ddd', borderRadius: 8, padding: 16 }}>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-        {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt=""
-            style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8 }}
-          />
+    <Box>
+      <Flex gap="3" align="center" justify="between" wrap="wrap">
+        <Flex gap="3" align="center" style={{ minWidth: 0 }}>
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt=""
+              style={{ width: 56, height: 56, borderRadius: 12, objectFit: 'cover', flexShrink: 0 }}
+            />
+          ) : (
+            <Box
+              aria-hidden="true"
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 12,
+                background: 'var(--gray-a4)',
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--gray-11)',
+                fontWeight: 800,
+                flexShrink: 0,
+              }}
+            >
+              C24
+            </Box>
+          )}
+
+          <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
+            <Heading size="4" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title}
+            </Heading>
+            {subtitle ? (
+              <Text size="2" color="gray" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {subtitle}
+              </Text>
+            ) : null}
+            {price ? (
+              <Text size="3" weight="bold">
+                {price}
+              </Text>
+            ) : null}
+          </Flex>
+        </Flex>
+
+        {ctaDeeplink ? (
+          <Button
+            onClick={() => {
+              navigateWithSso(ctaDeeplink);
+            }}
+          >
+            {ctaLabel || 'Ansehen'}
+          </Button>
         ) : null}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 18, fontWeight: 600 }}>{title}</div>
-          {subtitle ? <div style={{ opacity: 0.8, marginTop: 4 }}>{subtitle}</div> : null}
-          {price ? <div style={{ marginTop: 8, fontWeight: 600 }}>{price}</div> : null}
-        </div>
-        {ctaLabel && ctaDeeplink ? (
-          <a href={ctaDeeplink} style={{ whiteSpace: 'nowrap' }}>
-            {ctaLabel}
-          </a>
-        ) : null}
-      </div>
-    </section>
+      </Flex>
+    </Box>
   );
 }

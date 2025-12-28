@@ -76,9 +76,9 @@ Returns `widgets[]` already sorted by priority.
 - `INGEST_KEY_TRAVEL` (default: `dev-secret-123`)
 
 Optional auth (MongoDB + JWT):
-- `MONGODB_URI` (unset -> auth endpoints disabled)
+- `MONGODB_URI` (unset -> `/api/auth/*` disabled)
 - `MONGODB_DB` (default: `check24-home`)
-- `JWT_SECRET` (unset -> auth endpoints disabled)
+- `JWT_SECRET` (required)
 - `JWT_EXPIRES_IN` (default: `7d`)
 
 Ingest auth keys follow the pattern `INGEST_KEY_<PRODUCT_ID_UPPER_SNAKE>`.
@@ -192,9 +192,18 @@ Invoke-RestMethod -Method Post `
 
 ### PowerShell: Read Home widgets
 ```powershell
+# Requires MONGODB_URI + JWT_SECRET to be set on the home-core
+
+$register = Invoke-RestMethod -Method Post `
+	-Uri "http://localhost:3000/api/auth/register" `
+	-ContentType "application/json" `
+	-Body (@{ email = "demo@example.com"; password = "test1234" } | ConvertTo-Json)
+
+$token = $register.token
+
 Invoke-RestMethod `
 	-Uri "http://localhost:3000/api/home" `
-	-Headers @{ "x-user-id" = "1" }
+	-Headers @{ Authorization = "Bearer $token" }
 ```
 
 ## Troubleshooting

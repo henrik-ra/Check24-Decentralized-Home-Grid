@@ -2,6 +2,7 @@ const cors = require('@fastify/cors');
 const fastifyJwt = require('@fastify/jwt');
 const fastifyFactory = require('fastify');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const { createClient } = require('redis');
 
@@ -72,6 +73,14 @@ const fastify = fastifyFactory({
 	bodyLimit: Number.isFinite(maxPayloadBytes) && maxPayloadBytes > 0 ? maxPayloadBytes : 65536,
 });
 
+if (!jwtSecret) {
+	// JWT is required for /api/home in this PoC. Running without a configured secret would be insecure.
+	// Fail fast so deployments don't silently start with a broken/weak auth configuration.
+	// eslint-disable-next-line no-console
+	console.error('Missing required env var: JWT_SECRET');
+	process.exit(1);
+}
+
 const redis = createClient({ url: redisUrl });
 redis.on('error', (error) => fastify.log.error({ error }, 'Redis client error'));
 
@@ -98,10 +107,6 @@ function getBearerToken(request) {
 async function resolveUserIdOrThrow(request, reply) {
 	const bearerToken = getBearerToken(request);
 	if (!bearerToken) {
-		if (String(process.env.ALLOW_X_USER_ID || '').toLowerCase() === 'true') {
-			const userIdHeader = String(request.headers['x-user-id'] || '').trim();
-			if (userIdHeader) return userIdHeader;
-		}
 		reply.status(401).send({ error: 'Unauthorized' });
 		return undefined;
 	}
@@ -129,6 +134,25 @@ const authBodySchema = {
 		password: { type: 'string', minLength: 6, maxLength: 200 },
 	},
 };
+
+const handoffExchangeSchema = {
+	type: 'object',
+	required: ['code'],
+	additionalProperties: false,
+	properties: {
+		code: { type: 'string', minLength: 10, maxLength: 200 },
+	},
+};
+
+const authHandoffTtlSeconds = Number.parseInt(process.env.AUTH_HANDOFF_TTL_SECONDS || '60', 10);
+
+function newHandoffCode() {
+	return crypto.randomBytes(18).toString('base64url');
+}
+
+function handoffKey(code) {
+	return `auth:handoff:${code}`;
+}
 
 fastify.post(
 	'/api/auth/register',
@@ -196,6 +220,61 @@ fastify.post(
 		} catch (error) {
 			request.log.error({ error }, 'Failed to login user');
 			return reply.status(500).send({ error: 'Auth failure' });
+		}
+	}
+);
+
+// ---------------------------------
+// Cross-origin SSO handoff (PoC)
+// ---------------------------------
+// Real CHECK24 would typically use cookie-based SSO on a shared parent domain.
+// In this PoC, product sites are separate origins, so we mint a short-lived one-time code
+// that a product site can exchange for a JWT.
+
+fastify.post('/api/auth/handoff', async (request, reply) => {
+	const userId = await resolveUserIdOrThrow(request, reply);
+	if (!userId) return undefined;
+
+	const code = newHandoffCode();
+	const ttl = Number.isFinite(authHandoffTtlSeconds) && authHandoffTtlSeconds > 0 ? authHandoffTtlSeconds : 60;
+
+	try {
+		await redis.set(handoffKey(code), String(userId), { EX: ttl });
+		return reply.send({ code, expiresInSeconds: ttl });
+	} catch (error) {
+		request.log.error({ error }, 'Failed to create auth handoff');
+		return reply.status(503).send({ error: 'Auth unavailable' });
+	}
+});
+
+fastify.post(
+	'/api/auth/exchange',
+	{
+		schema: { body: handoffExchangeSchema },
+	},
+	async (request, reply) => {
+		const code = String(request.body.code || '').trim();
+		if (!code) return reply.status(400).send({ error: 'Invalid payload' });
+
+		try {
+			const key = handoffKey(code);
+			let userId;
+			if (typeof redis.getDel === 'function') {
+				userId = await redis.getDel(key);
+			} else {
+				userId = await redis.get(key);
+				if (userId) await redis.del(key);
+			}
+
+			if (!userId) {
+				return reply.status(400).send({ error: 'Invalid or expired code' });
+			}
+
+			const token = fastify.jwt.sign({ sub: String(userId) });
+			return reply.send({ token, user: { id: String(userId), email: String(userId) } });
+		} catch (error) {
+			request.log.error({ error }, 'Failed to exchange auth handoff');
+			return reply.status(503).send({ error: 'Auth unavailable' });
 		}
 	}
 );
@@ -317,6 +396,21 @@ function buildBaselineWidgets() {
 	const softExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(widgetSoftTtlSeconds, 60));
 	const hardExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(widgetHardTtlSeconds, 3600));
 
+	const normalizeUrl = (value) => {
+		const v = String(value || '').trim();
+		if (!v) return '';
+		return v.endsWith('/') ? v.slice(0, -1) : v;
+	};
+
+	const withOfferPath = (baseUrl, fallbackDeeplink) => {
+		const base = normalizeUrl(baseUrl);
+		return base ? `${base}/offer/123` : fallbackDeeplink;
+	};
+
+	const travelOfferUrl = withOfferPath(process.env.TRAVEL_WEB_URL, 'check24://travel/offer/123');
+	const dslOfferUrl = withOfferPath(process.env.DSL_WEB_URL, 'check24://dsl/offer/123');
+	const insuranceOfferUrl = withOfferPath(process.env.INSURANCE_WEB_URL, 'check24://insurance/offer/123');
+
 	return [
 		{
 			schemaVersion: '1.0',
@@ -332,7 +426,7 @@ function buildBaselineWidgets() {
 						subtitle: 'Top Pauschalreisen entdecken',
 						imageUrl: 'https://via.placeholder.com/80/00b4db/ffffff?text=travel',
 						price: 'Top Deals',
-						cta: { label: 'Ansehen', action: 'deeplink', deeplink: 'check24://travel/offer/123' },
+						cta: { label: 'Ansehen', action: 'deeplink', deeplink: travelOfferUrl },
 					},
 				},
 			],
@@ -356,7 +450,7 @@ function buildBaselineWidgets() {
 						subtitle: 'Tarife für Zuhause prüfen',
 						imageUrl: 'https://via.placeholder.com/80/663399/ffffff?text=dsl',
 						price: 'Schnell & günstig',
-						cta: { label: 'Vergleichen', action: 'deeplink', deeplink: 'check24://dsl/offer/123' },
+						cta: { label: 'Vergleichen', action: 'deeplink', deeplink: dslOfferUrl },
 					},
 				},
 			],
@@ -380,7 +474,7 @@ function buildBaselineWidgets() {
 						subtitle: 'Potenzial sparen entdecken',
 						imageUrl: 'https://via.placeholder.com/80/2ecc71/ffffff?text=ins',
 						price: 'Sparpotenzial',
-						cta: { label: 'Berechnen', action: 'deeplink', deeplink: 'check24://insurance/offer/123' },
+						cta: { label: 'Berechnen', action: 'deeplink', deeplink: insuranceOfferUrl },
 					},
 				},
 			],

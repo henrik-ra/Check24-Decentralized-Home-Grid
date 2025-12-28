@@ -35,8 +35,11 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import retrofit2.HttpException
+import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.POST
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,9 +80,20 @@ data class SduiComponent(
 )
 
 interface HomeApi {
+  @POST("api/auth/register")
+  suspend fun register(@Body body: Map<String, String>): AuthResponse
+
+  @POST("api/auth/login")
+  suspend fun login(@Body body: Map<String, String>): AuthResponse
+
   @GET("api/home")
-  suspend fun getHome(@Header("x-user-id") userId: String): HomeResponse
+  suspend fun getHome(@Header("authorization") authorization: String): HomeResponse
 }
+
+data class AuthResponse(
+  val token: String,
+  val user: Map<String, Any?>? = null
+)
 
 class HomeViewModel : ViewModel() {
   private val _state = MutableStateFlow(HomeUiState())
@@ -88,16 +102,17 @@ class HomeViewModel : ViewModel() {
   private val api: HomeApi = createApi()
 
   init {
-    refresh("1")
+    refresh("demo@example.com")
   }
 
-  fun refresh(userId: String) {
-    _state.value = _state.value.copy(isLoading = true, error = null, userId = userId)
+  fun refresh(email: String) {
+    _state.value = _state.value.copy(isLoading = true, error = null, userId = email)
     viewModelScope.launch {
       try {
-        val response = api.getHome(userId)
+        val token = ensureToken(email)
+        val response = api.getHome("Bearer $token")
         _state.value = HomeUiState(
-          userId = userId,
+          userId = email,
           greeting = response.greeting,
           widgets = response.widgets,
           isLoading = false,
@@ -105,6 +120,19 @@ class HomeViewModel : ViewModel() {
         )
       } catch (e: Exception) {
         _state.value = _state.value.copy(isLoading = false, error = e.message ?: "Unknown error")
+      }
+    }
+  }
+
+  private suspend fun ensureToken(email: String): String {
+    val password = "test1234"
+    return try {
+      api.register(mapOf("email" to email, "password" to password)).token
+    } catch (e: HttpException) {
+      if (e.code() == 409) {
+        api.login(mapOf("email" to email, "password" to password)).token
+      } else {
+        throw e
       }
     }
   }
@@ -130,7 +158,7 @@ class HomeViewModel : ViewModel() {
 }
 
 data class HomeUiState(
-  val userId: String = "1",
+  val userId: String = "demo@example.com",
   val greeting: String = "Loading…",
   val widgets: List<HomeWidget> = emptyList(),
   val isLoading: Boolean = true,
@@ -148,8 +176,8 @@ fun HomeScreen(viewModel: HomeViewModel = viewModel()) {
     Spacer(modifier = Modifier.height(12.dp))
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      Button(onClick = { viewModel.refresh("1") }) { Text("User 1") }
-      Button(onClick = { viewModel.refresh("2") }) { Text("User 2") }
+      Button(onClick = { viewModel.refresh("demo@example.com") }) { Text("Demo") }
+      Button(onClick = { viewModel.refresh("alt@example.com") }) { Text("Alt") }
     }
 
     Spacer(modifier = Modifier.height(12.dp))
