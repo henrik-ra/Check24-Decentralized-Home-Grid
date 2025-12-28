@@ -9,7 +9,7 @@ const pushIntervalMs = Number.parseInt(process.env.PUSH_INTERVAL_MS || '5000', 1
 const productId = String(process.env.PRODUCT_ID || 'travel').trim().toLowerCase();
 const productWebUrl = String(process.env.PRODUCT_WEB_URL || '').trim().replace(/\/$/, '');
 
-// Map<email, Map<vertical, clickCount>>
+// Map<email, Map<vertical, { totalCount: number, lastOfferId: string, offerCounts: Map<string, number> }>>
 const clickCounts = new Map();
 
 fastify.register(require('@fastify/cors'), {
@@ -61,24 +61,42 @@ const WIDGET_TEMPLATES = {
   },
 };
 
+function svgDataUrl({ text, width, height, bg = '#eeeeee', fg = '#333333' }) {
+  const safeText = String(text || '').replace(/[<>]/g, '');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <rect width="100%" height="100%" fill="${bg}" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="${fg}" font-family="Arial, sans-serif" font-size="24">${safeText}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function normalizeVertical(vertical) {
   const v = String(vertical || '').trim().toLowerCase();
   return v || productId;
 }
 
-function buildOfferDeeplink(vertical) {
+function buildOfferDeeplink(vertical, offerId) {
   const v = normalizeVertical(vertical);
-  if (productWebUrl && v === productId) return `${productWebUrl}/offer/123`;
-  return `check24://${v}/offer/123`;
+  const id = String(offerId || '123').trim() || '123';
+  if (productWebUrl && v === productId) return `${productWebUrl}/offer/${id}`;
+  return `check24://${v}/offer/${id}`;
 }
 
-function incClickCount(email, vertical) {
+function incClickCount(email, vertical, offerId) {
   const v = normalizeVertical(vertical);
+  const id = String(offerId || '123').trim() || '123';
   if (!clickCounts.has(email)) clickCounts.set(email, new Map());
   const perVertical = clickCounts.get(email);
-  const next = (perVertical.get(v) || 0) + 1;
-  perVertical.set(v, next);
-  return { vertical: v, count: next };
+
+  const existing = perVertical.get(v) || { totalCount: 0, lastOfferId: id, offerCounts: new Map() };
+  existing.totalCount = (existing.totalCount || 0) + 1;
+  existing.lastOfferId = id;
+  if (!existing.offerCounts) existing.offerCounts = new Map();
+  const nextOffer = (existing.offerCounts.get(id) || 0) + 1;
+  existing.offerCounts.set(id, nextOffer);
+
+  perVertical.set(v, existing);
+  return { vertical: v, offerId: id, offerClicks: nextOffer, totalClicks: existing.totalCount };
 }
 
 async function sendSignal({ userId, productId, weight }) {
@@ -100,17 +118,20 @@ async function sendSignal({ userId, productId, weight }) {
   }
 }
 
-async function pushWidget({ userId, vertical, clickCount }) {
+async function pushWidget({ userId, vertical, offerId, offerClicks, totalClicks }) {
   const template = WIDGET_TEMPLATES[vertical];
   if (!template) return;
 
   const productId = vertical.toUpperCase();
   const price = Math.floor(Math.random() * 200) + 20;
-  const intensity = Number(clickCount) || 1;
+  const intensity = Number(offerClicks) || 1;
+  const total = Number(totalClicks) || intensity;
 
   // Always push the large format for personalized widgets.
   // CompactRow is reserved for Home-Core baseline fillers.
   const widgetId = `${vertical}.primary.v1`;
+  const offerLabel = String(offerId || '123');
+  const hintImageUrl = svgDataUrl({ text: `${vertical.toUpperCase()} ${offerLabel}`, width: 640, height: 160 });
   const components = [
     {
       type: 'HeroBanner',
@@ -118,16 +139,17 @@ async function pushWidget({ userId, vertical, clickCount }) {
         title: `${template.title} für dich`,
         subtitle: template.subtitle,
         price: `${price} €`,
-        imageUrl: `https://via.placeholder.com/150/${template.color.replace('#', '')}/ffffff?text=${vertical}`,
-        cta: { label: template.cta, action: 'deeplink', deeplink: buildOfferDeeplink(vertical) },
+        imageUrl: svgDataUrl({ text: vertical.toUpperCase(), width: 150, height: 150, bg: template.color, fg: '#ffffff' }),
+        cta: { label: template.cta, action: 'deeplink', deeplink: buildOfferDeeplink(vertical, offerId) },
       },
     },
     {
       type: 'TextCard',
       props: {
         label: 'Personalized hint',
-        title: `Warum ${vertical}?`,
-        text: `Du hast ${vertical} angeklickt (Intensität ${intensity}).`,
+        title: `Warum ${template.title}?`,
+        text: `Du hast Angebot #${offerLabel} in ${vertical.toUpperCase()} ${intensity}x angeklickt (gesamt ${total} Klicks).`,
+        imageUrl: hintImageUrl,
       },
     },
   ];
@@ -142,6 +164,8 @@ async function pushWidget({ userId, vertical, clickCount }) {
       data: {
         price: `${price} €`,
         intensity,
+        offerId: offerLabel,
+        totalClicks: total,
       },
     },
   };
@@ -162,16 +186,16 @@ async function pushWidget({ userId, vertical, clickCount }) {
 }
 
 fastify.post('/api/simulate/interest', async (request, reply) => {
-  const { email, vertical } = request.body || {};
+  const { email, vertical, offerId } = request.body || {};
   if (!email) return reply.code(400).send({ error: 'email required' });
 
-  const { vertical: v, count } = incClickCount(email, vertical);
-  fastify.log.info({ email, vertical: v, clicks: count }, 'User showed interest');
+  const { vertical: v, offerId: id, offerClicks, totalClicks } = incClickCount(email, vertical, offerId);
+  fastify.log.info({ email, vertical: v, offerId: id, offerClicks, totalClicks }, 'User showed interest');
 
   await sendSignal({ userId: email, productId: v.toUpperCase(), weight: 1 });
-  await pushWidget({ userId: email, vertical: v, clickCount: count });
+  await pushWidget({ userId: email, vertical: v, offerId: id, offerClicks, totalClicks });
 
-  return reply.send({ status: 'interest_registered', email, vertical: v, clickCount: count });
+  return reply.send({ status: 'interest_registered', email, vertical: v, offerId: id, offerClicks, totalClicks });
 });
 
 fastify.get('/health', async () => {
@@ -179,7 +203,16 @@ fastify.get('/health', async () => {
     status: 'ok',
     clickCounts: Array.from(clickCounts.entries()).map(([email, map]) => ({
       email,
-      verticals: Object.fromEntries(map.entries()),
+      verticals: Object.fromEntries(
+        Array.from(map.entries()).map(([v, state]) => [
+          v,
+          {
+            totalClicks: state.totalCount || 0,
+            lastOfferId: state.lastOfferId,
+            offers: Object.fromEntries(Array.from((state.offerCounts || new Map()).entries())),
+          },
+        ])
+      ),
     })),
   };
 });
@@ -187,8 +220,11 @@ fastify.get('/health', async () => {
 setInterval(async () => {
   if (clickCounts.size === 0) return;
   for (const [email, map] of clickCounts.entries()) {
-    for (const [vertical, count] of map.entries()) {
-      await pushWidget({ userId: email, vertical, clickCount: count });
+    for (const [vertical, state] of map.entries()) {
+      if (!state) continue;
+      const offerId = state.lastOfferId || '123';
+      const offerClicks = (state.offerCounts && state.offerCounts.get(offerId)) || 1;
+      await pushWidget({ userId: email, vertical, offerId, offerClicks, totalClicks: state.totalCount || offerClicks });
     }
   }
 }, pushIntervalMs);

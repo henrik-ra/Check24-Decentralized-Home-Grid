@@ -260,7 +260,15 @@ fastify.post(
 			const key = handoffKey(code);
 			let userId;
 			if (typeof redis.getDel === 'function') {
-				userId = await redis.getDel(key);
+				try {
+					userId = await redis.getDel(key);
+				} catch (error) {
+					// Some Redis providers/versions don't support GETDEL.
+					// Fall back to GET + DEL (best-effort) so SSO still works.
+					request.log.warn({ error: error?.message }, 'Redis GETDEL failed; falling back to GET+DEL');
+					userId = await redis.get(key);
+					if (userId) await redis.del(key);
+				}
 			} else {
 				userId = await redis.get(key);
 				if (userId) await redis.del(key);

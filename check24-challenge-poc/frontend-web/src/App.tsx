@@ -23,6 +23,16 @@ import { navigateWithSso } from './sso';
 const TOKEN_STORAGE_KEY = 'c24_token';
 const USER_STORAGE_KEY = 'c24_user';
 
+function svgDataUrl(options: { text: string; width: number; height: number; bg?: string; fg?: string }): string {
+  const bg = options.bg ?? '#eeeeee';
+  const fg = options.fg ?? '#333333';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${options.width}" height="${options.height}">
+  <rect width="100%" height="100%" fill="${bg}" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="${fg}" font-family="Arial, sans-serif" font-size="24">${options.text}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 type User = { email: string };
 
 function normalizeUrl(value: string | undefined): string {
@@ -168,6 +178,11 @@ export function App() {
                 <Card size="4">
                   <Flex direction="column" gap="4">
                     <Flex direction="column" gap="1">
+                      <img
+                        src={svgDataUrl({ text: 'CHECK24 Mock', width: 640, height: 160 })}
+                        alt=""
+                        style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 12 }}
+                      />
                       <Heading size="6">CHECK24 Home (PoC)</Heading>
                       <Text color="gray" size="2">
                         API: <Badge color="gray">{apiBaseUrl}</Badge>
@@ -250,7 +265,12 @@ export function App() {
         <Box style={{ borderBottom: '1px solid var(--gray-a5)' }}>
           <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
             <Flex align="center" gap="4" wrap="wrap">
-              <Flex align="baseline" gap="2">
+              <Flex align="center" gap="2">
+                <img
+                  src={svgDataUrl({ text: 'C24', width: 64, height: 64 })}
+                  alt=""
+                  style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover' }}
+                />
                 <Heading size="4">CHECK24</Heading>
                 <Text size="2" color="gray">
                   Home

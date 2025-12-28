@@ -7,6 +7,16 @@ const USER_STORAGE_KEY = 'c24_user';
 
 type User = { email: string };
 
+function svgDataUrl(options: { text: string; width: number; height: number; bg?: string; fg?: string }): string {
+  const bg = options.bg ?? '#eeeeee';
+  const fg = options.fg ?? '#333333';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${options.width}" height="${options.height}">
+  <rect width="100%" height="100%" fill="${bg}" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="${fg}" font-family="Arial, sans-serif" font-size="24">${options.text}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function normalizeBaseUrl(value: string | undefined): string {
   const v = (value ?? '').trim();
   return v.endsWith('/') ? v.slice(0, -1) : v;
@@ -68,6 +78,42 @@ export function App() {
   const coreUrl = useMemo(() => getCoreUrl(), []);
   const offerId = useMemo(() => getOfferIdFromPathname(window.location.pathname), []);
 
+  const offers = useMemo(
+    () => [
+      {
+        id: '101',
+        title: 'Speedboat City Break (3 Tage)',
+        subtitle: 'ab 199€ · inkl. Hotel & Flug',
+        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+101',
+      },
+      {
+        id: '102',
+        title: 'Speedboat Strandurlaub (7 Tage)',
+        subtitle: 'ab 599€ · All Inclusive',
+        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+102',
+      },
+      {
+        id: '103',
+        title: 'Speedboat Rundreise (10 Tage)',
+        subtitle: 'ab 899€ · geführte Tour',
+        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+103',
+      },
+      {
+        id: '104',
+        title: 'Speedboat Familienpaket (5 Tage)',
+        subtitle: 'ab 449€ · Kids inklusive',
+        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+104',
+      },
+      {
+        id: '105',
+        title: 'Speedboat Luxus-Upgrade (4 Tage)',
+        subtitle: 'ab 999€ · Premium Suite',
+        imageUrl: 'https://via.placeholder.com/640x360/eeeeee/333333?text=TRAVEL+105',
+      },
+    ],
+    []
+  );
+
   const [token, setToken] = useState<string>(() => loadToken());
   const [user, setUser] = useState<User | null>(() => loadUser());
   const [email, setEmail] = useState(() => loadUser()?.email ?? 'demo@example.com');
@@ -103,32 +149,40 @@ export function App() {
     };
   }, [coreUrl]);
 
-  const simulateInterest = async () => {
-    if (!email.trim()) {
+  const simulateInterest = async (clickedOfferId?: string, options?: { keepalive?: boolean; silent?: boolean }) => {
+    const effectiveEmail = (user?.email ?? email).trim();
+    if (!effectiveEmail) {
       setMessage('Bitte E-Mail eingeben.');
       return;
     }
 
     setIsSending(true);
-    setMessage(null);
+    if (!options?.silent) setMessage(null);
     try {
       const response = await fetch(`${speedboatUrl}/api/simulate/interest`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, vertical: 'travel' }),
+        body: JSON.stringify({ email: effectiveEmail, vertical: 'travel', offerId: clickedOfferId }),
+        keepalive: Boolean(options?.keepalive),
       });
 
       if (!response.ok) {
-        setMessage(`Fehler: ${response.status}`);
+        if (!options?.silent) setMessage(`Fehler: ${response.status}`);
         return;
       }
 
-      setMessage('Interesse gesendet. Öffne Home, um das Widget zu sehen.');
+      if (!options?.silent) setMessage('Interesse gesendet. Öffne Home, um das Widget zu sehen.');
     } catch (e: any) {
-      setMessage(e?.message ?? 'Netzwerkfehler');
+      if (!options?.silent) setMessage(e?.message ?? 'Netzwerkfehler');
     } finally {
       setIsSending(false);
     }
+  };
+
+  const openOffer = (id: string) => {
+    // Fire-and-forget interest signal; keepalive helps during navigation.
+    void simulateInterest(id, { keepalive: true, silent: true });
+    window.location.href = `/offer/${id}`;
   };
 
   return (
@@ -136,6 +190,11 @@ export function App() {
       <Box style={{ borderBottom: '1px solid var(--gray-a5)' }}>
         <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
           <Flex align="center" gap="3" wrap="wrap">
+            <img
+              src={svgDataUrl({ text: 'C24', width: 64, height: 64 })}
+              alt=""
+              style={{ width: 28, height: 28, borderRadius: 10, objectFit: 'cover' }}
+            />
             <Heading size="4">CHECK24</Heading>
             <Text size="2" color="gray">
               Travel
@@ -185,7 +244,7 @@ export function App() {
               )}
 
               <Flex gap="2" wrap="wrap">
-                <Button onClick={simulateInterest} disabled={isSending}>
+                <Button onClick={() => simulateInterest(offerId ?? undefined)} disabled={isSending}>
                   {isSending ? 'Sende…' : 'Interesse signalisieren'}
                 </Button>
                 {homeUrl ? (
@@ -206,18 +265,55 @@ export function App() {
 
           <Card size="3">
             <Flex direction="column" gap="2">
-              <Heading size="4">Links</Heading>
+              <Heading size="4">Mock-Angebote</Heading>
               <Text size="2" color="gray">
-                Beispiele: <Text weight="bold">/offer/123</Text>
+                5 Beispiel-Offers (Klicks werden gezählt)
               </Text>
-              <Flex gap="2" wrap="wrap">
-                <Button variant="soft" onClick={() => (window.location.href = '/offer/123')}>
-                  Angebot 123
-                </Button>
-                <Button variant="soft" onClick={() => (window.location.href = '/offer/999')}>
-                  Angebot 999
-                </Button>
-              </Flex>
+                <Box
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: 12,
+                  }}
+                >
+                  {offers.map((o) => (
+                    <Card
+                      key={o.id}
+                      size="2"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => openOffer(o.id)}
+                    >
+                      <Flex direction="column" gap="2">
+                        <img
+                          src={o.imageUrl}
+                          alt=""
+                          style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 10 }}
+                        />
+                        <Flex direction="column" gap="1">
+                          <Text weight="bold" size="3">
+                            {o.title}
+                          </Text>
+                          <Text size="2" color="gray">
+                            {o.subtitle}
+                          </Text>
+                        </Flex>
+                        <Flex align="center" justify="between" gap="2">
+                          <Badge color="orange">TRAVEL</Badge>
+                          <Button
+                            size="1"
+                            variant="soft"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openOffer(o.id);
+                            }}
+                          >
+                            Details
+                          </Button>
+                        </Flex>
+                      </Flex>
+                    </Card>
+                  ))}
+                </Box>
             </Flex>
           </Card>
         </Flex>

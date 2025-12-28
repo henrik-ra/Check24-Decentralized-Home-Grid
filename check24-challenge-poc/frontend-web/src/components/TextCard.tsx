@@ -10,9 +10,17 @@ export function TextCard({ component }: Props) {
   const title = typeof props.title === 'string' ? props.title : 'Info';
   const text = typeof props.text === 'string' ? props.text : '';
   const label = typeof props.label === 'string' ? props.label : undefined;
+  const imageUrl = typeof props.imageUrl === 'string' ? props.imageUrl : undefined;
 
   return (
     <Flex direction="column" gap="2">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt=""
+          style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 12 }}
+        />
+      ) : null}
       {label ? (
         <Text size="1" color="gray" weight="bold" style={{ letterSpacing: 0.2, textTransform: 'uppercase' }}>
           {label}
