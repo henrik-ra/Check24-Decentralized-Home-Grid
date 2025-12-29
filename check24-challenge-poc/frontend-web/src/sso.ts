@@ -1,65 +1,106 @@
 import { getApiBaseUrl } from './api';
 
 const TOKEN_STORAGE_KEY = 'c24_token';
+const HANDOFF_PARAM_NAME = 'handoff';
+const HTTP_URL_PATTERN = /^https?:\/\//i;
 
-function loadToken(): string {
+const HANDOFF_ENDPOINT = '/api/auth/handoff';
+
+/**
+ * Retrieves the authentication token from localStorage.
+ */
+function getStoredToken(): string {
   return localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
 }
 
+/**
+ * Checks if the given URL is an HTTP/HTTPS URL.
+ */
 function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
+  return HTTP_URL_PATTERN.test(url);
 }
 
-function appendHandoff(url: string, code: string): string {
+/**
+ * Appends the SSO handoff code to the target URL as a query parameter.
+ * Returns the original URL if parsing fails.
+ */
+function appendHandoffToUrl(targetUrl: string, handoffCode: string): string {
   try {
-    const u = new URL(url);
-    u.searchParams.set('handoff', code);
-    return u.toString();
-  } catch {
-    return url;
+    const url = new URL(targetUrl);
+    url.searchParams.set(HANDOFF_PARAM_NAME, handoffCode);
+    return url.toString();
+  } catch (error) {
+    return targetUrl;
   }
 }
 
+/**
+ * Creates a single-use handoff code for SSO by exchanging the current JWT token.
+ * @throws {Error} If the API call fails or returns an invalid response.
+ */
 async function createHandoffCode(token: string): Promise<string> {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/handoff`, {
+  const response = await fetch(`${getApiBaseUrl()}${HANDOFF_ENDPOINT}`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${token}`,
     },
   });
 
-  const bodyText = await response.text().catch(() => '');
   if (!response.ok) {
-    throw new Error(bodyText ? `handoff failed: ${response.status} - ${bodyText}` : `handoff failed: ${response.status}`);
+    const errorBody = await response.text().catch(() => '');
+    const errorMessage = errorBody 
+      ? `SSO handoff failed: ${response.status} - ${errorBody}` 
+      : `SSO handoff failed: ${response.status}`;
+    throw new Error(errorMessage);
   }
 
-  const data = bodyText ? (JSON.parse(bodyText) as any) : ({} as any);
-  const code = typeof data.code === 'string' ? data.code : '';
-  if (!code) throw new Error('handoff failed: missing code');
-  return code;
+  const responseBody = await response.text().catch(() => '');
+  const data = responseBody ? (JSON.parse(responseBody) as { code?: string }) : {};
+  
+  if (!data.code || typeof data.code !== 'string') {
+    throw new Error('SSO handoff failed: missing or invalid code in response');
+  }
+
+  return data.code;
 }
 
+/**
+ * Navigates to the target URL with SSO authentication if available.
+ * For HTTP/HTTPS URLs: Attempts to attach a handoff code for seamless authentication.
+ * For deep links: Navigates directly without SSO.
+ * Falls back to direct navigation if SSO fails.
+ */
 export async function navigateWithSso(url: string): Promise<void> {
-  const target = String(url || '').trim();
-  if (!target) return;
-
-  // Only attach handoff to real web URLs; keep deep links unchanged.
-  if (!isHttpUrl(target)) {
-    window.location.href = target;
+  const targetUrl = String(url || '').trim();
+  
+  if (!targetUrl) {
     return;
   }
 
-  const token = loadToken();
+  if (!isHttpUrl(targetUrl)) {
+    navigateToUrl(targetUrl);
+    return;
+  }
+
+  const token = getStoredToken();
   if (!token) {
-    window.location.href = target;
+    navigateToUrl(targetUrl);
     return;
   }
 
   try {
-    const code = await createHandoffCode(token);
-    window.location.href = appendHandoff(target, code);
-  } catch {
-    // Best-effort: still navigate.
-    window.location.href = target;
+    const handoffCode = await createHandoffCode(token);
+    const urlWithHandoff = appendHandoffToUrl(targetUrl, handoffCode);
+    navigateToUrl(urlWithHandoff);
+  } catch (error) {
+    // Best-effort: Navigate without SSO if handoff creation fails
+    navigateToUrl(targetUrl);
   }
+}
+
+/**
+ * Performs the actual browser navigation.
+ */
+function navigateToUrl(url: string): void {
+  window.location.href = url;
 }

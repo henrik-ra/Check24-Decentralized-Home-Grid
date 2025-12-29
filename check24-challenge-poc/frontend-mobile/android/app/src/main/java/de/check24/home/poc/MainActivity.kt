@@ -398,7 +398,7 @@ private fun LoginScreen(
   error: String?
 ) {
   var email by rememberSaveable { mutableStateOf(initialEmail.ifBlank { "demo@example.com" }) }
-  var password by rememberSaveable { mutableStateOf("test1234") }
+  var password by rememberSaveable { mutableStateOf("") }
 
   Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
     Text(text = "CHECK24 Home Widgets PoC", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

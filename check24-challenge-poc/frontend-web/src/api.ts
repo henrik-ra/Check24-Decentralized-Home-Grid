@@ -45,8 +45,13 @@ export async function login(email: string, password: string): Promise<AuthRespon
   return postJson<AuthResponse>('/api/auth/login', { email, password });
 }
 
-export async function fetchHome(token: string): Promise<HomeResponse> {
-  const response = await fetch(`${getApiBaseUrl()}/api/home`, {
+export async function fetchHome(token: string, forceRefresh = false): Promise<HomeResponse> {
+  const url = new URL(`${getApiBaseUrl()}/api/home`);
+  if (forceRefresh) {
+    url.searchParams.set('forceRefresh', 'true');
+  }
+
+  const response = await fetch(url.toString(), {
     cache: 'no-store',
     headers: {
       authorization: `Bearer ${token}`,

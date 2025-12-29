@@ -23,17 +23,19 @@ import { navigateWithSso } from './sso';
 const TOKEN_STORAGE_KEY = 'c24_token';
 const USER_STORAGE_KEY = 'c24_user';
 
-function svgDataUrl(options: { text: string; width: number; height: number; bg?: string; fg?: string }): string {
-  const bg = options.bg ?? '#eeeeee';
-  const fg = options.fg ?? '#333333';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${options.width}" height="${options.height}">
-  <rect width="100%" height="100%" fill="${bg}" />
-  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="${fg}" font-family="Arial, sans-serif" font-size="24">${options.text}</text>
-</svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 type User = { email: string };
+
+function useIsMobile(breakpointPx = 720) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpointPx]);
+
+  return isMobile;
+}
 
 function normalizeUrl(value: string | undefined): string {
   const v = (value ?? '').trim();
@@ -70,7 +72,7 @@ function useHomeFeed(token: string, enabled: boolean) {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetchHome(token);
+      const response = await fetchHome(token, true);
       setData(response);
     } catch (e: any) {
       setError(e?.message ?? 'Unknown error');
@@ -96,19 +98,8 @@ function useHomeFeed(token: string, enabled: boolean) {
       }
     })();
 
-    const interval = window.setInterval(() => {
-      fetchHome(token)
-        .then((response) => {
-          if (!cancelled) setData(response);
-        })
-        .catch(() => {
-          // best-effort polling; keep current UI
-        });
-    }, 5000);
-
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [enabled, token]);
 
@@ -143,9 +134,11 @@ export function App() {
 
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState<string>('demo@check24.dev');
-  // Backend enforces minLength=6 for passwords; keep the default valid to avoid Fastify 400s.
-  const [password, setPassword] = useState<string>('test1234');
+  const [password, setPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
+
+  const isMobile = useIsMobile();
+  const [isNavOpen, setIsNavOpen] = useState(false);
 
   const { data, error, isLoading, refresh } = useHomeFeed(token, Boolean(token));
 
@@ -154,6 +147,10 @@ export function App() {
     setToken('');
     setUser(null);
   };
+
+  useEffect(() => {
+    if (!isMobile) setIsNavOpen(false);
+  }, [isMobile]);
 
   const onSubmitAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,6 +169,18 @@ export function App() {
     if (!token) {
       return (
         <Box style={{ minHeight: '100vh' }}>
+          <Box style={{ backgroundColor: 'var(--c24-navbar-blue)', color: 'var(--gray-1)' }}>
+            <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
+              <Flex align="center" gap="2" wrap="wrap">
+                <Heading size="4" style={{ color: 'var(--gray-1)' }}>
+                  CHECK24
+                </Heading>
+                <Text size="2" style={{ color: 'var(--gray-1)' }}>
+                  Home
+                </Text>
+              </Flex>
+            </Container>
+          </Box>
           <Container size="2" style={{ paddingTop: 72, paddingBottom: 72 }}>
             <Flex direction="column" align="center" gap="5">
               <Box style={{ width: '100%', maxWidth: 520 }}>
@@ -262,62 +271,172 @@ export function App() {
 
   return (
       <Box style={{ minHeight: '100vh' }}>
-        <Box style={{ borderBottom: '1px solid var(--gray-a5)' }}>
+      <Box style={{ backgroundColor: 'var(--c24-navbar-blue)', color: 'var(--gray-1)' }}>
           <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
-            <Flex align="center" gap="4" wrap="wrap">
-              <Flex align="center" gap="2">
-                <img
-                  src="https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=48&h=48&fit=crop"
-                  alt=""
-                  style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover' }}
-                />
-                <Heading size="4">CHECK24</Heading>
-                <Text size="2" color="gray">
-                  Home
-                </Text>
+            <Flex direction="column" gap="2">
+              <Flex align="center" gap="4" wrap="wrap">
+                <Flex align="center" gap="2" style={{ minWidth: 220 }}>
+                  <Heading size="4" style={{ color: 'var(--gray-1)' }}>
+                    CHECK24
+                  </Heading>
+                  <Text size="2" style={{ color: 'var(--gray-1)' }}>
+                    Home
+                  </Text>
+                </Flex>
+
+                {!isMobile ? (
+                  <Flex align="center" gap="5" wrap="wrap">
+                    {travelWebUrl ? (
+                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)' }}>
+                        <a
+                          className="c24-nav-link"
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            navigateWithSso(travelWebUrl);
+                          }}
+                        >
+                          Reisen
+                        </a>
+                      </Button>
+                    ) : null}
+                    {dslWebUrl ? (
+                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)' }}>
+                        <a
+                          className="c24-nav-link"
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            navigateWithSso(dslWebUrl);
+                          }}
+                        >
+                          DSL
+                        </a>
+                      </Button>
+                    ) : null}
+                    {insuranceWebUrl ? (
+                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)' }}>
+                        <a
+                          className="c24-nav-link"
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            navigateWithSso(insuranceWebUrl);
+                          }}
+                        >
+                          Versicherung
+                        </a>
+                      </Button>
+                    ) : null}
+                  </Flex>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    style={{ color: 'var(--gray-1)', marginLeft: 'auto' }}
+                    onClick={() => setIsNavOpen((v) => !v)}
+                  >
+                    {isNavOpen ? 'Schließen' : 'Menü'}
+                  </Button>
+                )}
+
+                {!isMobile ? (
+                  <Flex align="center" gap="3" style={{ marginLeft: 'auto' }}>
+                    <Text size="2" style={{ color: 'var(--gray-1)' }}>
+                      {user?.email}
+                    </Text>
+                    <Button variant="ghost" style={{ color: 'var(--gray-1)' }} onClick={logout}>
+                      Logout
+                    </Button>
+                  </Flex>
+                ) : null}
               </Flex>
 
-              <Flex align="center" gap="2" wrap="wrap">
-                {travelWebUrl ? (
-                  <Button variant="soft" onClick={() => navigateWithSso(travelWebUrl)}>
-                    Reisen
-                  </Button>
-                ) : null}
-                {dslWebUrl ? (
-                  <Button variant="soft" onClick={() => navigateWithSso(dslWebUrl)}>
-                    DSL
-                  </Button>
-                ) : null}
-                {insuranceWebUrl ? (
-                  <Button variant="soft" onClick={() => navigateWithSso(insuranceWebUrl)}>
-                    Versicherung
-                  </Button>
-                ) : null}
-              </Flex>
+              {isMobile && isNavOpen ? (
+                <Flex direction="column" gap="2" style={{ paddingBottom: 6 }}>
+                  <Flex align="center" gap="5" wrap="wrap">
+                    {travelWebUrl ? (
+                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)', justifyContent: 'flex-start' }}>
+                        <a
+                          className="c24-nav-link"
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            navigateWithSso(travelWebUrl);
+                          }}
+                        >
+                          Reisen
+                        </a>
+                      </Button>
+                    ) : null}
+                    {dslWebUrl ? (
+                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)', justifyContent: 'flex-start' }}>
+                        <a
+                          className="c24-nav-link"
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            navigateWithSso(dslWebUrl);
+                          }}
+                        >
+                          DSL
+                        </a>
+                      </Button>
+                    ) : null}
+                    {insuranceWebUrl ? (
+                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)', justifyContent: 'flex-start' }}>
+                        <a
+                          className="c24-nav-link"
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            navigateWithSso(insuranceWebUrl);
+                          }}
+                        >
+                          Versicherung
+                        </a>
+                      </Button>
+                    ) : null}
+                  </Flex>
 
-              <Flex align="center" gap="3" style={{ marginLeft: 'auto' }}>
-                <Text size="2" color="gray">
-                  {user?.email}
-                </Text>
-                <Button variant="soft" onClick={logout}>
-                  Logout
-                </Button>
-              </Flex>
+                  <Flex align="center" gap="3" wrap="wrap">
+                    <Text size="2" style={{ color: 'var(--gray-1)' }}>
+                      {user?.email}
+                    </Text>
+                    <Button variant="ghost" style={{ color: 'var(--gray-1)' }} onClick={logout}>
+                      Logout
+                    </Button>
+                  </Flex>
+                </Flex>
+              ) : null}
             </Flex>
           </Container>
         </Box>
 
         <Container size="3" style={{ paddingTop: 20, paddingBottom: 36 }}>
           <Flex direction="column" gap="4">
-            <Flex direction="column" gap="1">
+            <Flex direction="column" gap="3">
               <Heading size="6">Dein Home</Heading>
-                {data?.welcomeText ? (
-                  <Text size="3">{data.welcomeText}</Text>
-                ) : (
-                  <Text color="gray" size="2">
-                    Push-basierte Widgets mit Baseline-on-read (min. 3) und Signalen.
-                  </Text>
-                )}
+              {data?.welcomeText ? (
+                <Card size="2">
+                  <Flex direction="column" gap="2">
+                    <Flex justify="between" align="center">
+                      <Badge color="purple" variant="solid">
+                        AI Generated Message
+                      </Badge>
+                      <Button size="1" variant="ghost" onClick={refresh}>
+                        <ReloadIcon /> Refresh Message
+                      </Button>
+                    </Flex>
+                    <Text size="3" style={{ lineHeight: 1.5 }}>
+                      {data.welcomeText}
+                    </Text>
+                  </Flex>
+                </Card>
+              ) : (
+                <Text color="gray" size="2">
+                  Push-basierte Widgets mit Baseline-on-read (min. 3) und Signalen.
+                </Text>
+              )}
             </Flex>
 
             <Flex gap="2" align="center" wrap="wrap">
