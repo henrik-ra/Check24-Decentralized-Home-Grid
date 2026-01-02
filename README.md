@@ -25,7 +25,7 @@ This PoC demonstrates an architecture that allows products to contribute persona
 | :--- | :--- |
 |  **[Technical Concept](check24-challenge-poc/docs/CONCEPT.md)** | Architecture, data flow, and design decisions. |
 |  **[Developer Guidelines](check24-challenge-poc/docs/DEVELOPER_GUIDELINE.md)** | Integration guide for product teams. |
-|  **[Application Video](check24-challenge-poc/docs/Check24-demo.mp4)** | 5-minute walkthrough of the concept and PoC. |
+|  **[Application Video](https://youtu.be/HjqHHvuhDmo)** | 5-minute walkthrough of the concept and PoC. |
 |  **[Live Deployment](https://c24w2yw4ryh.z6.web.core.windows.net/)** | Live demo running on Azure. |
 
 ---
