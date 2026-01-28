@@ -43,6 +43,9 @@ param(
   [string]$OpenRouterApiKey = "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"
 )
 
+# ==============================================================================
+# 1. CONFIGURATION & PREPARATION (Environment Checks)
+# ==============================================================================
 $ErrorActionPreference = "Stop"
 
 function Assert-Command {
@@ -101,6 +104,9 @@ if ([string]::IsNullOrWhiteSpace($SpeedboatInsuranceIngestApiKey)) {
   $SpeedboatInsuranceIngestApiKey = $IngestKeyInsurance
 }
 
+# ==============================================================================
+# 2. INFRASTRUCTURE DEPLOYMENT (Azure Bicep)
+# ==============================================================================
 # Use an ARM parameters file to keep quoting stable across shells.
 $paramsFile = Join-Path $env:TEMP ("home-core-params-" + $deploymentName + ".json")
 $params = @{
@@ -131,6 +137,9 @@ az deployment group create `
   --template-file $bicepPath `
   --parameters ("@" + $paramsFile) | Out-Null
 
+# ==============================================================================
+# 3. OUTPUTS & VARIABLES (Read Results from Azure)
+# ==============================================================================
 # Read outputs
 $acrName = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.acrName.value" -o tsv
 $acrLoginServer = az deployment group show --name $deploymentName --resource-group $ResourceGroupName --query "properties.outputs.acrLoginServer.value" -o tsv
@@ -155,7 +164,10 @@ if ([string]::IsNullOrWhiteSpace($acrName) -or [string]::IsNullOrWhiteSpace($acr
 Write-Host "ACR: $acrName ($acrLoginServer)"
 Write-Host "Container App: $containerAppName"
 if (-not [string]::IsNullOrWhiteSpace($speedboatAppName)) {
-  Write-Host "Speedboat App: $speedboatAppName"
+  ==============================================================================
+# 4. BACKEND BUILD & DEPLOY (Docker Images -> Azure Container Apps)
+# ==============================================================================
+# Write-Host "Speedboat App: $speedboatAppName"
 }
 
 # Build + push image (server-side via ACR, no local Docker needed)
@@ -176,9 +188,15 @@ az acr build --registry $acrName --image "speedboat-dsl:$ImageTag" $speedboatDsl
 Write-Host "Building (ACR build): $speedboatInsuranceImageRef"
 az acr build --registry $acrName --image "speedboat-insurance:$ImageTag" $speedboatInsurancePath | Out-Null
 
-# IMPORTANT:
-# Azure Container Apps can keep serving an older image when using a mutable tag like "latest".
-# To avoid stale deployments, resolve the tag to the *current digest* and deploy the pinned digest.
+# IMPORTANT: STALE DEPLOYMENT PREVENTION
+# Azure Container Apps (ACA) may optimize deployment time by skipping the image pull if the tag (e.g., 'latest')
+# is indistinguishable from the currently running version, even if the image content has changed in the registry.
+#
+# To guarantee that the code we JUST built is the code that actually runs:
+# 1. We query the Azure Container Registry (ACR) for the unique SHA256 digest of the build we just pushed.
+# 2. We construct a "pinned" image reference (e.g., 'myreg.azurecr.io/image@sha256:abc...').
+# 3. We update the Container App with this pinned reference. This forces ACA to recognize a configuration change
+#    and spin up a new specific revision with the correct bits.
 function Resolve-AcrDigest {
   param(
     [Parameter(Mandatory = $true)][string]$RegistryName,
@@ -232,7 +250,10 @@ try {
   curl.exe --ssl-no-revoke -s -S "$containerAppUrl/health" | Out-Null
 }
 catch {
-  # Don't fail deployment on local SSL revocation checks / curl issues.
+  ==============================================================================
+# 5. FRONTEND DEPLOYMENT (Helper Functions)
+# ==============================================================================
+# # Don't fail deployment on local SSL revocation checks / curl issues.
 }
 
 # --------------------
@@ -266,6 +287,7 @@ function Get-StaticWebsiteUrl {
   return $url
 }
 
+# follows in last step
 function Build-ViteFrontend {
   param(
     [Parameter(Mandatory = $true)][string]$FrontendPath,
@@ -289,6 +311,7 @@ function Build-ViteFrontend {
   }
 }
 
+# follow/executed as final last step
 function Upload-StaticSite {
   param(
     [Parameter(Mandatory = $true)][string]$AccountName,
@@ -308,28 +331,42 @@ if ([string]::IsNullOrWhiteSpace($homeFrontendStorageAccountName) -or
   throw "Missing one or more frontend storage account outputs; check the Bicep deployment outputs."
 }
 
+
+# 1. Retrieve access keys for all storage accounts
 $homeStorageKey = Get-StorageKey -AccountName $homeFrontendStorageAccountName
 $travelStorageKey = Get-StorageKey -AccountName $travelFrontendStorageAccountName
 $dslStorageKey = Get-StorageKey -AccountName $dslFrontendStorageAccountName
 $insuranceStorageKey = Get-StorageKey -AccountName $insuranceFrontendStorageAccountName
 
 Write-Host "Enabling static websites (index.html, 404 -> index.html)"
+# 2. Configure storage accounts as static web servers (SPA routing)
 Enable-StaticWebsite -AccountName $homeFrontendStorageAccountName -AccountKey $homeStorageKey
 Enable-StaticWebsite -AccountName $travelFrontendStorageAccountName -AccountKey $travelStorageKey
 Enable-StaticWebsite -AccountName $dslFrontendStorageAccountName -AccountKey $dslStorageKey
 Enable-StaticWebsite -AccountName $insuranceFrontendStorageAccountName -AccountKey $insuranceStorageKey
 
+# 3. Retrieve the public HTTP URLs for the hosted sites
 $homeFrontendUrl = Get-StaticWebsiteUrl -AccountName $homeFrontendStorageAccountName
 $travelFrontendUrl = Get-StaticWebsiteUrl -AccountName $travelFrontendStorageAccountName
 $dslFrontendUrl = Get-StaticWebsiteUrl -AccountName $dslFrontendStorageAccountName
 $insuranceFrontendUrl = Get-StaticWebsiteUrl -AccountName $insuranceFrontendStorageAccountName
+
+
+
+==============================================================================
+# 6. LINKING & FINALIZATION (Inject URLs & Build Code)
+# ==============================================================================
+# This phase resolves the "Chicken & Egg" problem:
+# - Backends need to know valid Frontend URLs (for redirects/CORS)
+# - Frontends need to know valid Backend URLs (for API calls)
 
 Write-Host "Home frontend URL: $homeFrontendUrl"
 Write-Host "Travel frontend URL: $travelFrontendUrl"
 Write-Host "DSL frontend URL: $dslFrontendUrl"
 Write-Host "Insurance frontend URL: $insuranceFrontendUrl"
 
-# Wire URLs into Container Apps (baseline deeplinks + product deeplinks)
+# A. UPDATE BACKENDS: Inject the now-known Frontend URLs into Container Apps
+#    This allows the backend to generate valid deep links or configure CORS properly.
 az containerapp update --name $containerAppName --resource-group $ResourceGroupName --set-env-vars "TRAVEL_WEB_URL=$travelFrontendUrl" "DSL_WEB_URL=$dslFrontendUrl" "INSURANCE_WEB_URL=$insuranceFrontendUrl" "DEPLOYMENT_TOKEN=$deployToken" | Out-Null
 
 if (-not [string]::IsNullOrWhiteSpace($speedboatAppName)) {
@@ -342,7 +379,8 @@ if (-not [string]::IsNullOrWhiteSpace($speedboatInsuranceAppName)) {
   az containerapp update --name $speedboatInsuranceAppName --resource-group $ResourceGroupName --set-env-vars "PRODUCT_WEB_URL=$insuranceFrontendUrl" "DEPLOYMENT_TOKEN=$deployToken" | Out-Null
 }
 
-# Build + upload Home frontend
+# B. BUILD & UPLOAD FRONTENDS: "Bake" the Backend URLs into the static JS files
+#    We run 'npm run build' HERE (not earlier) because we finally have the real Cloud URLs for the APIs.
 Write-Host "Building Home frontend (Vite) with API=$containerAppUrl and product URLs"
 Build-ViteFrontend -FrontendPath $frontendPath -Env @{
   VITE_API_BASE_URL = $containerAppUrl

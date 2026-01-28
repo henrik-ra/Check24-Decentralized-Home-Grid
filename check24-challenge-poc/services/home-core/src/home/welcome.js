@@ -2,11 +2,13 @@
  * AI-generated welcome text with fallback templates
  */
 
+// Config + helpers
 const config = require('../config');
 const { buildWelcomeTextKey } = require('../utils/keys');
 const { normalizeWelcomeText } = require('../utils/validation');
 const { withTimeout } = require('../utils/time');
 
+// Parse last interest from object or legacy string
 function parseLastInterest(raw) {
 	if (!raw) return undefined;
 	if (typeof raw === 'object') {
@@ -35,6 +37,7 @@ function parseLastInterest(raw) {
 	return { productId: text };
 }
 
+// Format optional offer title/subtitle for prompts
 function buildLastInterestPromptSuffix(lastInterest) {
 	const title = typeof lastInterest?.offerTitle === 'string' ? lastInterest.offerTitle.trim() : '';
 	const subtitle = typeof lastInterest?.offerSubtitle === 'string' ? lastInterest.offerSubtitle.trim() : '';
@@ -44,6 +47,7 @@ function buildLastInterestPromptSuffix(lastInterest) {
 	return '';
 }
 
+// Map product id to display name
 function getInterestDisplayName(productId) {
 	const id = String(productId || '').trim().toLowerCase();
 	if (!id) return undefined;
@@ -55,6 +59,7 @@ function getInterestDisplayName(productId) {
 	return map[id] || id.toUpperCase();
 }
 
+// Rank and return top interests by affinity score
 function getTopInterestsFromAffinities(affinities, limit) {
 	const entries = Object.entries(affinities || {})
 		.map(([productId, rawScore]) => {
@@ -70,6 +75,7 @@ function getTopInterestsFromAffinities(affinities, limit) {
 		.filter((x) => Boolean(x.label));
 }
 
+// Prefer last interest, otherwise top affinity
 function getSingleInterest(affinities, lastInterestRaw) {
 	const lastInterest = parseLastInterest(lastInterestRaw);
 	const lastProductId = String(lastInterest?.productId || '').trim();
@@ -80,6 +86,7 @@ function getSingleInterest(affinities, lastInterestRaw) {
 	return getTopInterestsFromAffinities(affinities, 1);
 }
 
+// Build fallback text if LLM is unavailable
 function buildFallbackWelcomeText(interests) {
 	const top = interests?.[0]?.label;
 	if (!top) {
@@ -106,6 +113,7 @@ function buildFallbackWelcomeText(interests) {
 	return variants[Math.floor(Math.random() * variants.length)];
 }
 
+// Generate text via LLM using a strict prompt - few shot prompting
 async function generateWelcomeTextWithLlm(interestLabel) {
 	if (!config.llm.apiKey) return '';
 	const label = String(interestLabel || '').trim();
@@ -153,10 +161,12 @@ async function generateWelcomeTextWithLlm(interestLabel) {
 		top_p: 0.7,
 	};
 
+	// Base headers for LLM request
 	const headers = {
 		'content-type': 'application/json',
 		authorization: `Bearer ${config.llm.apiKey}`,
 	};
+	// Optional OpenRouter attribution headers
 	if (config.llm.openRouterApiKey && config.llm.siteUrl) {
 		headers['HTTP-Referer'] = config.llm.siteUrl;
 	}
@@ -164,6 +174,7 @@ async function generateWelcomeTextWithLlm(interestLabel) {
 		headers['X-Title'] = config.llm.appName;
 	}
 
+	// Call LLM endpoint
 	const response = await fetch(`${config.llm.baseUrl}/chat/completions`, {
 		method: 'POST',
 		headers,
@@ -175,11 +186,13 @@ async function generateWelcomeTextWithLlm(interestLabel) {
 		throw new Error(`LLM failed: ${response.status}${bodyText ? ` - ${bodyText}` : ''}`);
 	}
 
+	// Parse response and normalize text
 	const data = await response.json();
 	const text = data?.choices?.[0]?.message?.content;
 	return normalizeWelcomeText(text);
 }
 
+// Main entry: cache -> LLM -> fallback -> cache
 async function getOrGenerateWelcomeText(redis, request, userId, affinities, lastInterestRaw, skipCache = false) {
 	const cacheKey = buildWelcomeTextKey(userId);
 

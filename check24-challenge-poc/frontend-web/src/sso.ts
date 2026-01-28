@@ -6,6 +6,30 @@ const HTTP_URL_PATTERN = /^https?:\/\//i;
 
 const HANDOFF_ENDPOINT = '/api/auth/handoff';
 
+/*
+-------------------------------------------------------------------------
+Handoff-Code example:
+7f3a8b2c9d1e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9
+
+↑
+64 Zeichen lang (32 Bytes Hex)
+Enthält KEINE User-Daten (nur Zufall)
+60 Sekunden gültig
+Kann NICHT dekodiert werden (Random)
+
+-------------------------------------------------------------------------
+
+JWT example:
+  eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2NzhjZmYxMjM0NTYiLCJlbWFpbCI6ImRlbW9AY2hlY2syNC5kZXYiLCJpYXQiOjE3Mzc4OTEyMDAsImV4cCI6MTczNzk3NzYwMH0.K8ZqJ3vY9mN2xR4tL7wP5eA1cD6fG8hI0jK2lM3nO4p
+    ↑
+    205 Zeichen lang
+    Enthält User-Daten (email, userId)
+    7 Tage gültig
+    Kann dekodiert werden (Base64)
+
+ */
+
+
 /**
  * Retrieves the authentication token from localStorage.
  */

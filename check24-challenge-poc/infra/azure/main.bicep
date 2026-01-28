@@ -1,6 +1,18 @@
+/*
+Bicep cannot solve the deployment completely on its own because:
+
+Problem: Container Apps need storage URLs BEFORE they start
+Storage URLs exist AFTER the Bicep deployment
+
+Solution: 2-phase deployment
+Phase 1: Bicep (Infrastructure)
+Phase 2: PowerShell (Configuration)
+*/
 targetScope = 'resourceGroup'
 
-@description('Location for all resources.')
+// ==============================================================================
+// 1. PARAMETERS (Configuration inputs)
+// ==============================================================================
 param location string = resourceGroup().location
 
 @description('Short prefix used to build resource names (keep it short).')
@@ -60,6 +72,9 @@ param containerCpu string = '0.5'
 @description('Memory for the container app (e.g. "1.0Gi").')
 param containerMemory string = '1.0Gi'
 
+// ==============================================================================
+// 2. VARIABLES (Naming conventions & computed values)
+// ==============================================================================
 var unique = toLower(substring(uniqueString(resourceGroup().id, namePrefix), 0, 6))
 var deployUnique = toLower(substring(uniqueString(resourceGroup().id, deployment().name), 0, 6))
 var acrName = toLower('${namePrefix}acr${unique}')
@@ -76,6 +91,9 @@ var travelWebStorageName = toLower('${namePrefix}w${unique}t')
 var dslWebStorageName = toLower('${namePrefix}w${unique}d')
 var insuranceWebStorageName = toLower('${namePrefix}w${unique}i')
 
+// ==============================================================================
+// 3. FRONTEND STATIC WEBSITES (Azure Storage)
+// ==============================================================================
 // NOTE: We intentionally deploy the storage account as native resources (not AVM)
 // because the AVM module currently doesn't expose the blob static website settings.
 
@@ -204,6 +222,11 @@ resource insuranceWebContainer 'Microsoft.Storage/storageAccounts/blobServices/c
   properties: {
     publicAccess: 'Blob'
   }
+
+  //==============================================================================
+// 4. SHARED INFRASTRUCTURE (Environment, Registry, Redis)
+// ==============================================================================
+// 
 }
 
 // --------------------
@@ -270,6 +293,11 @@ resource redisResource 'Microsoft.Cache/redis@2024-11-01' existing = {
     redis
   ]
 }
+
+// ==============================================================================
+// 5. BACKEND SERVICES (Core & Speedboats)
+// ==============================================================================
+// 
 
 var redisKeys = redisResource.listKeys()
 var redisPrimaryKey = redisKeys.primaryKey
@@ -639,6 +667,11 @@ module speedboatInsuranceContainerApp 'br/public:avm/res/app/container-app:0.18.
     ]
   }
 }
+
+
+// ==============================================================================
+// 6. OUTPUTS (To be used by deploy.ps1)
+// ==============================================================================
 
 @description('Container App name.')
 output containerAppName string = containerApp.outputs.name

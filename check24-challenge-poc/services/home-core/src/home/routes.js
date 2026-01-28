@@ -33,10 +33,10 @@ function registerHomeRoutes(fastify, { redis }) {
 		const lastInterestKey = buildLastInterestKey(userId);
 
 		try {
-			const [widgetKeys, affinities, lastInterestRaw] = await Promise.all([
-				withTimeout(redis.sMembers(userIndexKey), config.redis.readTimeoutMs, 'redis.sMembers(userIndexKey)'),
-				withTimeout(redis.hGetAll(affinityKey), config.redis.readTimeoutMs, 'redis.hGetAll(affinityKey)'),
-				withTimeout(redis.get(lastInterestKey), config.redis.readTimeoutMs, 'redis.get(lastInterestKey)'),
+			const [widgetKeys, affinities, lastInterestRaw] = await Promise.all([ // parallel
+				withTimeout(redis.sMembers(userIndexKey), config.redis.readTimeoutMs, 'redis.sMembers(userIndexKey)'), // get all widget keys for user (set of members): das am ende in '' nur ein STRING für Fehlermeldungen
+				withTimeout(redis.hGetAll(affinityKey), config.redis.readTimeoutMs, 'redis.hGetAll(affinityKey)'), // get all affinities for user /hash also key-value)
+				withTimeout(redis.get(lastInterestKey), config.redis.readTimeoutMs, 'redis.get(lastInterestKey)'), // get last interest for user (string)
 			]);
 
 			const forceRefresh = request.query.forceRefresh === 'true';
@@ -49,6 +49,7 @@ function registerHomeRoutes(fastify, { redis }) {
 				forceRefresh
 			);
 
+			// if widgetKeys is empty build empty home response
 			if (!widgetKeys || widgetKeys.length === 0) {
 				const response = buildEmptyHomeResponse({ degraded: false });
 				response.welcomeText = welcomeText;
@@ -61,13 +62,14 @@ function registerHomeRoutes(fastify, { redis }) {
 			const expiredKeys = [];
 			const widgets = [];
 
+			
 			for (let index = 0; index < widgetKeys.length; index += 1) {
 				const key = widgetKeys[index];
 				const raw = rawWidgets[index];
 				if (raw === null) {
 					expiredKeys.push(key);
 					continue;
-				}
+				} 
 
 				try {
 					const widget = JSON.parse(raw);

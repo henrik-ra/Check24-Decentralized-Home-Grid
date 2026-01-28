@@ -6,6 +6,9 @@ const config = require('../config');
 const { buildRateLimitKey, buildIdempotencyKey } = require('../utils/keys');
 const { assertFinitePositiveInt } = require('../utils/validation');
 
+/**
+ * Parses the Content-Length header to validate payload size.
+ */
 function getContentLengthBytes(request) {
 	const raw = request.headers['content-length'];
 	if (raw === undefined) return undefined;
@@ -13,10 +16,16 @@ function getContentLengthBytes(request) {
 	return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+/**
+ * Calculates the start timestamp for the current rate limit window.
+ */
 function getWindowStartEpochSeconds(nowEpochSeconds, windowSeconds) {
 	return Math.floor(nowEpochSeconds / windowSeconds) * windowSeconds;
 }
 
+/**
+ * Enforces rate limits per product using Redis. Throws 429 if limit exceeded.
+ */
 async function enforceRateLimitOrThrow(redis, productId) {
 	const limit = assertFinitePositiveInt(config.ingest.rateLimitPerMinute, 120);
 	const nowEpochSeconds = Math.floor(Date.now() / 1000);
@@ -37,6 +46,10 @@ async function enforceRateLimitOrThrow(redis, productId) {
 	}
 }
 
+/**
+ * Checks if a request with the given idempotency key was already processed.
+ * Returns true if it is a duplicate.
+ */
 async function checkIdempotency(redis, productId, idempotencyKey) {
 	if (!idempotencyKey) return false;
 

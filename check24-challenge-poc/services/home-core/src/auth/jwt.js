@@ -2,6 +2,7 @@
  * JWT utilities for authentication
  */
 
+// Extract Bearer token from Authorization header
 function getBearerToken(request) {
 	const header = String(request.headers['authorization'] || '').trim();
 	if (!header) return undefined;
@@ -9,6 +10,7 @@ function getBearerToken(request) {
 	return match ? match[1].trim() : undefined;
 }
 
+// Verify token and return user id; sends 401 on failure
 async function resolveUserIdOrThrow(fastify, request, reply) {
 	const bearerToken = getBearerToken(request);
 	if (!bearerToken) {

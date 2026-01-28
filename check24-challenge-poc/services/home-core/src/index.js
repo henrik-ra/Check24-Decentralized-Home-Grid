@@ -26,11 +26,11 @@ if (!config.jwt.secret) {
 }
 
 // Register core plugins
-fastify.register(cors, { origin: true });
+fastify.register(cors, { origin: true }); // Enable CORS for all origins (adjust in production)
 fastify.register(fastifyJwt, {
 	secret: config.jwt.secret,
 	sign: { expiresIn: config.jwt.expiresIn },
-});
+}); // sign and verify JWTs with private secret
 
 // Health check endpoint
 fastify.get('/health', async () => ({ ok: true }));
@@ -42,10 +42,10 @@ async function start() {
 
 	// Connect to databases
 	const redis = await connectRedis(fastify.log);
-	const { usersCollection } = await connectMongo(fastify.log);
+	const { usersCollection } = await connectMongo(fastify.log); // take property usersCollection from object
 
 	// Register route modules
-	registerAuthRoutes(fastify, { usersCollection, redis });
+	registerAuthRoutes(fastify, { usersCollection, redis }); // go to routes.js file in auth
 	registerIngestRoutes(fastify, { redis });
 	registerHomeRoutes(fastify, { redis });
 
@@ -61,7 +61,7 @@ async function start() {
 
 	const port = Number.parseInt(process.env.PORT || '3000', 10);
 	const host = process.env.HOST || '0.0.0.0';
-	await fastify.listen({ port, host });
+	await fastify.listen({ port, host }); // starts http server
 }
 
 start().catch((error) => {

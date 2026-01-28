@@ -25,6 +25,13 @@ const USER_STORAGE_KEY = 'c24_user';
 
 type User = { email: string };
 
+/**
+ * Tracks whether viewport is below mobile breakpoint via window resize events.
+ * Uses lazy state initialization to avoid measuring on every render.
+ * Cleanup removes event listener to prevent memory leaks on unmount.
+ * @param breakpointPx - Width threshold in pixels (default: 720)
+ * @returns true if window.innerWidth < breakpointPx
+ */
 function useIsMobile(breakpointPx = 720) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
 
@@ -37,36 +44,76 @@ function useIsMobile(breakpointPx = 720) {
   return isMobile;
 }
 
+/**
+ * Normalizes URLs by removing trailing slashes for consistent deeplink construction.
+ * Prevents duplicate slashes when appending query params (e.g., ?handoff=code).
+ * @param value - Raw URL from environment variables
+ * @returns Trimmed URL without trailing slash, or empty string if invalid
+ */
 function normalizeUrl(value: string | undefined): string {
   const v = (value ?? '').trim();
   if (!v) return '';
   return v.endsWith('/') ? v.slice(0, -1) : v;
 }
 
+/**
+ * Retrieves JWT token from localStorage for session persistence.
+ * Nullish coalescing ensures return type is never null (defaults to empty string).
+ * @returns JWT token or empty string if not found
+ */
 function loadToken(): string {
   return localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
 }
 
+/**
+ * Deserializes user object from localStorage JSON string.
+ * Returns null instead of throwing on invalid JSON (fail-safe pattern).
+ * @returns User object with email, or null if not found/invalid
+ */
 function loadUser(): { email: string } | null {
   const stored = localStorage.getItem(USER_STORAGE_KEY);
   return stored ? JSON.parse(stored) : null;
 }
 
+/**
+ * Persists authentication state to localStorage after successful login/register.
+ * Synchronous operation - no async storage APIs needed for PoC.
+ * @param token - JWT token from backend /api/auth/login or /api/auth/register
+ * @param user - User object containing at least email property
+ */
 function saveAuth(token: string, user: { email: string }) {
   localStorage.setItem(TOKEN_STORAGE_KEY, token);
   localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
 }
 
+/**
+ * Removes authentication state from localStorage on logout.
+ * Companion to saveAuth - ensures clean logout without orphaned tokens.
+ */
 function clearAuth() {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
 }
 
+/**
+ * Manages widget feed state with automatic fetching on mount and manual refresh.
+ * Uses 'enabled' flag to prevent API calls when user is logged out.
+ * Implements cleanup pattern (cancelled flag) to avoid state updates after unmount.
+ * IIFE pattern inside useEffect required because useEffect cannot be async directly.
+ * @param token - JWT token for Authorization header
+ * @param enabled - Controls whether auto-fetch runs (typically Boolean(token))
+ * @returns {data, error, isLoading, refresh} - Widget data and control functions
+ */
 function useHomeFeed(token: string, enabled: boolean) {
   const [data, setData] = useState<HomeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  /**
+   * Manually triggers widget refresh with AI message regeneration.
+   * Passes regenerateAI=true to backend to invoke OpenRouter LLM.
+   * Exposes loading/error states for UI feedback (button spinner, error callout).
+   */
   const refresh = async () => {
     if (!token) return;
     setIsLoading(true);
@@ -81,9 +128,11 @@ function useHomeFeed(token: string, enabled: boolean) {
     }
   };
 
+
+  // executed as soon as enabled or token value changes
   useEffect(() => {
-    if (!enabled || !token) return;
-    let cancelled = false;
+    if (!enabled || !token) return; // check if allowed to fetch
+    let cancelled = false; // Prevent state updates after unmount, race conditions
 
     (async () => {
       setIsLoading(true);
@@ -106,6 +155,12 @@ function useHomeFeed(token: string, enabled: boolean) {
   return { data, error, isLoading, refresh };
 }
 
+/**
+ * Skeleton placeholder grid for initial widget loading state.
+ * Prevents layout shift by rendering empty cards with pulsing Skeleton components.
+ * Uses responsive columns (1 on mobile, 2 on desktop) matching actual widget grid.
+ * @returns 3 skeleton cards mimicking widget structure
+ */
 function LoadingGrid() {
   return (
     <Grid columns={{ initial: '1', md: '2' }} gap="3">
@@ -122,17 +177,31 @@ function LoadingGrid() {
   );
 }
 
-export function App() {
-  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+/**
+ * Main application component managing authentication state and widget feed.
+ * Conditional rendering: Login screen (unauthenticated) vs. Home feed (authenticated).
+ * 
+ * Architecture:
+ * - Token/user persisted in localStorage for session continuity
+ * - SSO navigation via navigateWithSso (handoff code exchange)
+ * - Responsive layout: mobile hamburger menu vs. desktop horizontal nav
+ * - Widget feed uses push model (Speedboats → Home-Core → Redis → Frontend)
+ * 
+ * @returns Login UI or authenticated Home feed with widgets
+ */
 
-  const travelWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_TRAVEL_WEB_URL), []);
+export function App() {
+  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []); // Value stays for whole session
+
+  // Speedboat frontend URLs - normalized once, used for SSO deeplinks
+  const travelWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_TRAVEL_WEB_URL), []); // Value stays for whole session
   const dslWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_DSL_WEB_URL), []);
   const insuranceWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_INSURANCE_WEB_URL), []);
 
-  const [token, setToken] = useState<string>(() => loadToken());
+  const [token, setToken] = useState<string>(() => loadToken()); // Value stays for whole session
   const [user, setUser] = useState<User | null>(() => loadUser());
 
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login'); // initial auth mode to login
   const [email, setEmail] = useState<string>('demo@check24.dev');
   const [password, setPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -140,18 +209,30 @@ export function App() {
   const isMobile = useIsMobile();
   const [isNavOpen, setIsNavOpen] = useState(false);
 
+  // Fetch widgets only when authenticated (enabled = Boolean(token))
   const { data, error, isLoading, refresh } = useHomeFeed(token, Boolean(token));
 
+  /**
+   * Clears authentication state and returns to login screen.
+   * Synchronous operation - no backend call needed (JWT is stateless).
+   */
   const logout = () => {
     clearAuth();
     setToken('');
     setUser(null);
   };
 
+  // Auto-close mobile nav when resizing to desktop
   useEffect(() => {
     if (!isMobile) setIsNavOpen(false);
   }, [isMobile]);
 
+  /**
+   * Handles form submission for both login and registration.
+   * Prevents default form behavior (page reload) via e.preventDefault().
+   * On success: persists token/user to localStorage and updates state (triggers re-render to Home).
+   * On error: displays error message in Callout without blocking form.
+   */
   const onSubmitAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -166,6 +247,7 @@ export function App() {
     }
   };
 
+    // Render login/register screen for unauthenticated users
     if (!token) {
       return (
         <Box style={{ minHeight: '100vh' }}>
@@ -416,6 +498,7 @@ export function App() {
           <Flex direction="column" gap="4">
             <Flex direction="column" gap="3">
               <Heading size="6">Dein Home</Heading>
+              {/* AI welcome message from Home-Core (OpenRouter LLM) */}
               {data?.welcomeText ? (
                 <Card size="2">
                   <Flex direction="column" gap="2">
@@ -434,6 +517,7 @@ export function App() {
                 </Card>
               ) : (
                 <Text color="gray" size="2">
+                  {/* Architecture: Speedboats push widgets to Redis, Home reads on-demand */}
                   Push-basierte Widgets mit Baseline-on-read (min. 3) und Signalen.
                 </Text>
               )}
@@ -465,6 +549,7 @@ export function App() {
 
             {isLoading && !data ? <LoadingGrid /> : null}
 
+            {/* Empty state - should never happen due to baseline-on-read (min 3 widgets) */}
             {!isLoading && data && data.widgets.length === 0 ? (
               <Callout.Root color="amber" role="status">
                 <Callout.Text>

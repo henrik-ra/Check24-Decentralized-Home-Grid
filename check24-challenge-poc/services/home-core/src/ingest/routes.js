@@ -1,5 +1,9 @@
 /**
- * Ingest routes: /api/ingest, /api/signals
+ * ---------------------------------------------------------------
+ * 
+ * Ingest routes: POST /api/ingest, /api/signals
+ *
+ * ---------------------------------------------------------------
  */
 
 const config = require('../config');
@@ -13,6 +17,7 @@ function getHeader(request, name) {
 	return request.headers[name];
 }
 
+// from speedboat - signals user interest in offer, redis count up one number
 const signalBodySchema = {
 	type: 'object',
 	required: ['userId', 'signal', 'weight'],
@@ -27,6 +32,8 @@ const signalBodySchema = {
 	},
 };
 
+
+// from speedboat - ingest widget payload (ui and content for user)
 const ingestBodySchema = {
 	type: 'object',
 	required: ['userId', 'widgetData'],
@@ -48,23 +55,23 @@ const ingestBodySchema = {
 		},
 	},
 };
-
+ 
 function registerIngestRoutes(fastify, { redis }) {
 	// Signal endpoint (for product affinity tracking)
 	fastify.post(
 		'/api/signals',
 		{
-			schema: { body: signalBodySchema },
+			schema: { body: signalBodySchema }, // automatic access control, validate body against schema
 		},
-		async (request, reply) => {
+		async (request, reply) => { // fill variables auto with request and reply (Header, Body, etc)
 			const productId = String(getHeader(request, 'x-product-id') || '').trim();
-			const apiKey = String(getHeader(request, 'x-api-key') || '').trim();
+			const apiKey = String(getHeader(request, 'x-api-key') || '').trim(); // dev-secret-123
 			const expectedKey = productId ? String(getIngestKeyForProduct(productId) || '').trim() : '';
 
 			if (!productId || !apiKey || !expectedKey || expectedKey !== apiKey) {
 				return reply.status(403).send({ error: 'Forbidden' });
 			}
-
+ 
 			const { userId, weight } = request.body;
 			const { offerId, offerTitle, offerSubtitle } = request.body;
 			const affinityKey = buildAffinityKey(userId);
@@ -80,10 +87,26 @@ function registerIngestRoutes(fastify, { redis }) {
 
 			try {
 				await Promise.all([
-					redis.hIncrByFloat(affinityKey, productId, weight),
+					redis.hIncrByFloat(affinityKey, productId, weight), // hashes (Wörterbücher) in redis
 					redis.expire(affinityKey, 3600),
 					redis.set(lastInterestKey, JSON.stringify(lastInterestPayload), { EX: 3600 }),
 				]);
+					/* 
+					----------------------------------------------------
+					db example 
+ 
+					// Key: last_interest:user-123
+					// Wert (ein langer Text-String):
+					{
+					"productId": "travel",
+					"offerId": "offer-999-mallorca",
+					"offerTitle": "5 Tage Mallorca",
+					"offerSubtitle": "Inklusive Flug & Hotel",
+					"at": "2026-01-28T14:30:00.000Z"
+					}
+					----------------------------------------------------
+					*/
+
 				return reply.send({ status: 'signal_processed', productId, weight });
 			} catch (error) {
 				request.log.error({ error }, 'Failed to process signal');
@@ -110,7 +133,7 @@ function registerIngestRoutes(fastify, { redis }) {
 				);
 				return reply.status(403).send({ error: 'Forbidden' });
 			}
-
+ 
 			// Check payload size
 			const contentLengthBytes = getContentLengthBytes(request);
 			if (contentLengthBytes !== undefined && contentLengthBytes > config.ingest.maxPayloadBytes) {
@@ -129,7 +152,7 @@ function registerIngestRoutes(fastify, { redis }) {
 				return reply.status(500).send({ error: 'Storage Failure' });
 			}
 
-			// Idempotency check
+			// Idempotency check - check that request only being processed once even if sent multiple times
 			const idempotencyKey = String(getHeader(request, 'idempotency-key') || '').trim();
 			if (idempotencyKey) {
 				const isDuplicate = await checkIdempotency(redis, productId, idempotencyKey);
@@ -145,6 +168,7 @@ function registerIngestRoutes(fastify, { redis }) {
 			const softExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(config.ingest.widgetSoftTtlSeconds, 60));
 			const hardExpiresAt = addSecondsToIso(generatedAt, assertFinitePositiveInt(config.ingest.widgetHardTtlSeconds, 3600));
 
+			// load json from speedboat and wrap into standard envelope
 			const envelope = {
 				schemaVersion: widgetData.schemaVersion || '1.0',
 				widgetId,
@@ -166,17 +190,27 @@ function registerIngestRoutes(fastify, { redis }) {
 				const previousWidgetKey = await redis.get(latestWidgetKeyKey);
 				const shouldRemovePrevious = previousWidgetKey && typeof previousWidgetKey === 'string' && previousWidgetKey !== widgetKey;
 
-				const multi = redis.multi();
+				const multi = redis.multi(); // Start transaction: all commands either succeed or fail together
+
+				// 1. Save the actual widget content (TTL 1h)
 				multi.set(widgetKey, JSON.stringify(envelope), {
 					EX: assertFinitePositiveInt(config.ingest.widgetHardTtlSeconds, 3600),
 				});
+
+				// 2. Add widget reference to user's inbox list
 				multi.sAdd(userIndexKey, widgetKey);
 				multi.expire(userIndexKey, assertFinitePositiveInt(config.ingest.indexTtlSeconds, 604800));
-				multi.set(latestWidgetKeyKey, widgetKey, { EX: assertFinitePositiveInt(config.ingest.indexTtlSeconds, 604800) });
+
+				// 3. Mark this as the "latest" widget for this product (to replace it next time)
+				multi.set(latestWidgetKeyKey, widgetKey, { EX: assertFinitePositiveInt(config.ingest.indexTtlSeconds, 604800) }); // 7 days
+
+				// 4. Cleanup: Remove the old widget from this product if it exists
 				if (shouldRemovePrevious) {
 					multi.sRem(userIndexKey, previousWidgetKey);
 					multi.del(previousWidgetKey);
 				}
+
+				// Execute all commands atomically
 				await multi.exec();
 
 				return reply.send({ status: 'acknowledged' });

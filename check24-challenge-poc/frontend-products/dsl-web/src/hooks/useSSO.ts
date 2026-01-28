@@ -1,6 +1,11 @@
 /**
  * SSO Authentication Hook
  * Handles token management and handoff exchange
+ * 
+ * Wichtig: Der Code ist NICHT in localStorage! Nur in der URL als Query-Parameter.
+ * 
+ * https://dsl-web.azurewebsites.net/offer/201?handoff=7f3a8b2c9d1e4f5a6b7c8d9e
+
  */
 
 import { useEffect, useState } from 'react';
@@ -46,28 +51,37 @@ async function exchangeHandoff(coreUrl: string, code: string): Promise<{ token: 
 }
 
 export function useSSO(coreUrl: string) {
-	const [token, setToken] = useState<string>(() => loadToken());
-	const [user, setUser] = useState<User | null>(() => loadUser());
+	const [token, setToken] = useState<string>(() => loadToken()); // load initial token from local storage
+	const [user, setUser] = useState<User | null>(() => loadUser()); // load initial user from local storage
 	const [ssoError, setSsoError] = useState<string | null>(null);
 
 	useEffect(() => {
+		// Extrahiere Handoff-Code aus URL
 		const params = new URLSearchParams(window.location.search);
 		const handoff = params.get('handoff');
-		if (!handoff) return;
+		if (!handoff) return; // Kein Code → Normaler Login
 
+		// Exchange Code für JWT-Token
 		let cancelled = false;
 		(async () => {
 			try {
 				const result = await exchangeHandoff(coreUrl, handoff);
+				// → POST /api/auth/exchange { code: "7f3a8b2c9d..." }
+
+			
 				if (cancelled) return;
+				// speicher neuen JwT Token in localStorage
 				saveAuth(result.token, result.user);
 				setToken(result.token);
 				setUser(result.user);
-
+				
+				// Entferne Handoff-Code aus URL (Security)
 				params.delete('handoff');
 				const nextSearch = params.toString();
 				const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
 				window.history.replaceState({}, '', nextUrl);
+				// → URL wird zu: /offer/201 (ohne ?handoff=...)
+
 			} catch (e: any) {
 				if (!cancelled) setSsoError(e?.message ?? 'SSO exchange failed');
 			}

@@ -6,6 +6,7 @@ const { TEMPLATE } = require('./template');
 const { incClickCount, getClickCounts } = require('./tracking');
 const { sendSignal, pushWidget } = require('./core-client');
 
+// Builds a deeplink URL for an offer - but routing is still to general site and catch all in frontend
 function buildOfferDeeplink(offerId, productWebUrl, productId) {
 	const id = String(offerId || '123').trim() || '123';
 	if (productWebUrl) return `${productWebUrl}/offer/${id}`;
@@ -14,7 +15,7 @@ function buildOfferDeeplink(offerId, productWebUrl, productId) {
 
 function registerRoutes(fastify, { coreUrl, ingestApiKey, productId, productWebUrl }) {
 	// Simulate user interest in an offer
-	fastify.post('/api/simulate/interest', async (request, reply) => {
+	 fastify.post('/api/simulate/interest', async (request, reply) => {
 		const { email, offerId, offerTitle, offerSubtitle } = request.body || {};
 		if (!email) return reply.code(400).send({ error: 'email required' });
 
@@ -54,7 +55,7 @@ function registerRoutes(fastify, { coreUrl, ingestApiKey, productId, productWebU
 
 		const components = [
 			{
-				type: 'HeroBanner',
+				type: 'HeroBanner', // simplified for PoC - not actually used in frontend, but rendert based on priority, e.g. if > 50 visualization type 1
 				props: {
 					title: `${offerDisplayTitle || TEMPLATE.title} für dich`,
 					subtitle: offerDisplaySubtitle || TEMPLATE.subtitle,
@@ -112,5 +113,6 @@ function registerRoutes(fastify, { coreUrl, ingestApiKey, productId, productWebU
 		clickCounts: getClickCounts(productId),
 	}));
 }
+
 
 module.exports = { registerRoutes };

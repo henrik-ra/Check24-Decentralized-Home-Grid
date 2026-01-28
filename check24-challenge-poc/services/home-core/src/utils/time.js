@@ -15,6 +15,7 @@ function withTimeout(promise, timeoutMs, label) {
 		return promise;
 	}
 
+	// can be used if redis or other operations might take too long
 	return Promise.race([
 		promise,
 		new Promise((_, reject) => {

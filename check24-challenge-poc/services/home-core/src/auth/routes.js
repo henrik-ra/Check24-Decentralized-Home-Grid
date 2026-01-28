@@ -1,5 +1,11 @@
 /**
  * Authentication routes: register, login, SSO handoff
+ * ---------------------------------------------------------------	
+ *  User-CRUD (Mongo), 
+ * 	Passwort-Hashing, 
+ * 	JWT-Erzeugung, 
+ * 	SSO‑Handoff (Redis key setzen/getDel).
+ * ------------------------------------------------------------------
  */
 
 const bcrypt = require('bcryptjs');

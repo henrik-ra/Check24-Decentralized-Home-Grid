@@ -29,7 +29,7 @@ This PoC demonstrates an architecture that allows products to contribute persona
 |  **[Live Deployment](https://c24w2yw4ryh.z6.web.core.windows.net/)** | Live demo running on Azure. |
 
 ---
-
+ 
 ## 🧠 The Concept: Push-Based & Decentralized
 
 This PoC implements a **Push-based Snapshot Architecture** to decouple the central Home from decentralized product services ("speedboats").
