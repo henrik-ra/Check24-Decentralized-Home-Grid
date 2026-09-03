@@ -49,6 +49,12 @@ export function useSSO(coreUrl: string) {
 	const [token, setToken] = useState<string>(() => loadToken());
 	const [user, setUser] = useState<User | null>(() => loadUser());
 	const [ssoError, setSsoError] = useState<string | null>(null);
+	// true solange ein ?handoff=-Code in der URL auf seinen Exchange wartet —
+	// Aufrufer (z.B. das Auto-Interest-Signal) müssen warten, sonst laufen sie
+	// mit der falschen Identität (Fallback-E-Mail statt eingeloggtem User).
+	const [ssoPending, setSsoPending] = useState<boolean>(() =>
+		new URLSearchParams(window.location.search).has('handoff')
+	);
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
@@ -70,6 +76,8 @@ export function useSSO(coreUrl: string) {
 				window.history.replaceState({}, '', nextUrl);
 			} catch (e: any) {
 				if (!cancelled) setSsoError(e?.message ?? 'SSO exchange failed');
+			} finally {
+				if (!cancelled) setSsoPending(false);
 			}
 		})();
 
@@ -78,5 +86,5 @@ export function useSSO(coreUrl: string) {
 		};
 	}, [coreUrl]);
 
-	return { token, user, ssoError };
+	return { token, user, ssoError, ssoPending };
 }

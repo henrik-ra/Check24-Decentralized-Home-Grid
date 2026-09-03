@@ -64,9 +64,14 @@ export function App() {
 	const isMobile = useIsMobile();
 	const [isNavOpen, setIsNavOpen] = useState(false);
 
-	const { user, ssoError } = useSSO(coreUrl);
+	const { user, ssoError, ssoPending } = useSSO(coreUrl);
 	const [email, setEmail] = useState(() => user?.email ?? 'demo@example.com');
 	const [message, setMessage] = useState<string | null>(ssoError);
+
+	// ssoError entsteht asynchron — als useState-Initialwert wäre er immer null.
+	useEffect(() => {
+		if (ssoError) setMessage('Anmeldung über CHECK24 fehlgeschlagen.');
+	}, [ssoError]);
 
 	const lastAutoSignaledOfferIdRef = useRef<string | null>(null);
 	const signalSentFromClickRef = useRef<string | null>(null);
@@ -99,9 +104,12 @@ export function App() {
 		}
 	};
 
-	// Auto-signal interest when deep-linking to offer
+	// Auto-signal interest when deep-linking to offer.
+	// Wartet auf den SSO-Exchange (ssoPending) — sonst ginge das Signal mit der
+	// Fallback-E-Mail statt des eingeloggten Users raus und der Re-Run würde
+	// durch lastAutoSignaledOfferIdRef unterdrückt.
 	useEffect(() => {
-		if (!offerId) return;
+		if (!offerId || ssoPending) return;
 		if (lastAutoSignaledOfferIdRef.current === offerId) return;
 		if (signalSentFromClickRef.current === offerId) {
 			signalSentFromClickRef.current = null;
@@ -109,7 +117,7 @@ export function App() {
 		}
 		lastAutoSignaledOfferIdRef.current = offerId;
 		void handleSimulateInterest(offerId, { silent: true });
-	}, [offerId, user?.email]);
+	}, [offerId, ssoPending, user?.email]);
 
 	const openOffer = (id: string) => {
 		signalSentFromClickRef.current = id;
