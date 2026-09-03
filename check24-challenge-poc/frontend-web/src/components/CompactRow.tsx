@@ -1,15 +1,7 @@
-/* 
-
--------------------------------------------------------------------
-NOT ACUTALLY BEING USED RIGHT NOW, BUT KEPT FOR FUTURE REFERENCE
--------------------------------------------------------------------
-
-*/
-
-
+// Rendert die Baseline-Widgets ('Beliebte Vergleiche'). Android-Parität: Thumb 44px, Radius 12px.
 
 import type { SduiComponent } from '../types';
-import { Box, Button, Flex, Text } from '@radix-ui/themes';
+import { Badge, Box, Button, Flex, Text } from '@radix-ui/themes';
 import { navigateWithSso } from '../sso';
 
 type Props = {
@@ -18,7 +10,7 @@ type Props = {
 
 export function CompactRow({ component }: Props) {
   const props = component.props ?? {};
-  const title = typeof props.title === 'string' ? props.title : 'Untitled';
+  const title = typeof props.title === 'string' ? props.title : 'Empfehlung';
   const subtitle = typeof props.subtitle === 'string' ? props.subtitle : undefined;
   const price = typeof props.price === 'string' ? props.price : undefined;
   const imageUrl = typeof props.imageUrl === 'string' ? props.imageUrl : undefined;
@@ -28,7 +20,7 @@ export function CompactRow({ component }: Props) {
   const ctaDeeplink = cta && typeof cta.deeplink === 'string' ? cta.deeplink : undefined;
 
   return (
-    <Flex align="center" gap="3" justify="between" wrap="wrap">
+    <Flex align="center" gap="3" justify="between" wrap="wrap" style={{ minHeight: 44 }}>
       <Flex gap="3" align="center" style={{ minWidth: 0 }}>
         {imageUrl ? (
           <img
@@ -43,24 +35,22 @@ export function CompactRow({ component }: Props) {
               width: 44,
               height: 44,
               borderRadius: 12,
-              background: 'var(--gray-a4)',
+              background: 'var(--accent-3)',
               display: 'grid',
               placeItems: 'center',
-              color: 'var(--gray-11)',
-              fontWeight: 800,
               flexShrink: 0,
             }}
           >
-            C24
+            <img src="/Logo_CHECK24.png" alt="" aria-hidden="true" style={{ height: 20, opacity: 0.6 }} />
           </Box>
         )}
 
         <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
-          <Text size="2" weight="bold" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <Text size="2" weight="bold" className="c24-truncate">
             {title}
           </Text>
           {subtitle ? (
-            <Text size="1" color="gray" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Text size="1" color="gray" className="c24-truncate">
               {subtitle}
             </Text>
           ) : null}
@@ -68,20 +58,23 @@ export function CompactRow({ component }: Props) {
       </Flex>
 
       <Flex align="center" gap="3">
+        {/* Der price-Slot trägt bei Baseline Marketing-Text ('Top Deals', 'Sparpotenzial') —
+            deshalb Badge statt Bold-Preis-Optik. */}
         {price ? (
-          <Text size="2" weight="bold">
+          <Badge color="gray" variant="soft" style={{ whiteSpace: 'nowrap' }}>
             {price}
-          </Text>
+          </Badge>
         ) : null}
         {ctaDeeplink ? (
           <Button
             size="2"
             variant="soft"
+            style={{ minHeight: 36 }}
             onClick={() => {
               navigateWithSso(ctaDeeplink);
             }}
           >
-            {ctaLabel || 'Öffnen'}
+            {ctaLabel || 'Vergleichen'}
           </Button>
         ) : null}
       </Flex>

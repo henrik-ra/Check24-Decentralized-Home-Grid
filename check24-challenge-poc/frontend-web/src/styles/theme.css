@@ -1,0 +1,313 @@
+/* ============================================================================
+   CHECK24 Home — zentrale Style-Datei
+   Brand-Tokens, Radix-Accent-Override, Utilities, Keyframes und Navbar-Styles
+   in EINER Datei (ersetzt nav.css vollständig, null neue Dependencies).
+   ============================================================================ */
+
+/* 1) BRAND-TOKENS (auf :root, themenunabhängig) */
+:root {
+  --c24-navy:        #063773;  /* Header, dunkelster Akzent, Text auf Gelb (Kontrast 8.4:1 auf #FFD500) */
+  --c24-navy-hover:  #0A4A94;  /* Hover-Fläche für Nav-Links auf Navy */
+  --c24-blue:        #005EA8;  /* Primär: Solid-Buttons, Links (= accent-9) */
+  --c24-blue-hover:  #0271C2;  /* Hover auf Primär — HELLER, check24-Muster (= accent-10) */
+  --c24-yellow:      #FFD500;  /* kanonisches Gelb: Keyline, 'Für dich'-Badge, Fokus auf Navy */
+  --c24-yellow-deep: #FFBB1C;  /* warmes Gelb: Fresh-Puls-Ring, 'Neu'-Badge */
+  --c24-on-yellow:   #063773;  /* Text auf Gelb — NIE Weiß auf Gelb */
+  --c24-live:        #46A758;  /* Live-Dot im StatusChip (Radix grass-9) */
+  --c24-page-bg:     #F2F5F8;  /* Seitenhintergrund statt Weiß (Cards heben sich ab) */
+  --c24-surface-info:#ECF7FD;  /* hellblaue Info-Fläche (WelcomeCard) */
+  --c24-navbar-blue: var(--c24-navy);  /* Legacy-Alias aus nav.css, Wert korrigiert (war #0066CC) */
+  /* Motion */
+  --c24-ease:      cubic-bezier(0.16, 1, 0.3, 1);
+  --c24-dur-fast:  160ms;   /* Hover, Press, Opacity-Wechsel */
+  --c24-dur-enter: 240ms;   /* Card-Entrance */
+  --c24-dur-menu:  200ms;   /* Mobile-Menü */
+  --c24-dur-hero:  400ms;   /* Hero-Bild-Zoom */
+  --c24-dur-spin:  900ms;   /* Refresh-Spinner */
+}
+
+/* 2) RADIX-ACCENT-OVERRIDE (Light, Scope .radix-themes) — komplette 12-Stufen-Skala + Alphas,
+      damit solid/soft/surface/outline ALLE CI-konform sind */
+.radix-themes {
+  --accent-1: #FBFDFF;
+  --accent-2: #F4FAFE;
+  --accent-3: #ECF7FD;
+  --accent-4: #DCEEFB;
+  --accent-5: #C9E4F8;
+  --accent-6: #B0D6F2;
+  --accent-7: #8FC2E9;
+  --accent-8: #5EA5DB;
+  --accent-9: #005EA8;   /* solid */
+  --accent-10: #0271C2;  /* solid hover — heller */
+  --accent-11: #00518F;  /* Akzent-Text auf Hell (6.9:1) */
+  --accent-12: #063773;  /* dunkelster Akzent = Navy */
+  --accent-contrast: #FFFFFF;
+  --accent-surface: #ECF7FDCC;
+  --accent-indicator: #005EA8;
+  --accent-track: #005EA8;
+  --accent-a1: rgba(0, 94, 168, 0.02);
+  --accent-a2: rgba(0, 94, 168, 0.05);
+  --accent-a3: rgba(0, 94, 168, 0.10);
+  --accent-a4: rgba(0, 94, 168, 0.16);
+  --accent-a5: rgba(0, 94, 168, 0.24);
+  --accent-a6: rgba(0, 94, 168, 0.33);
+  --accent-a7: rgba(0, 94, 168, 0.45);
+  --accent-a8: rgba(0, 94, 168, 0.60);
+  --accent-a9: rgba(0, 94, 168, 1);
+  --accent-a10: rgba(2, 113, 194, 1);
+  --accent-a11: rgba(0, 81, 143, 1);
+  --accent-a12: rgba(6, 55, 115, 1);
+  --focus-8: #5EA5DB;
+  --focus-a8: rgba(0, 94, 168, 0.5);
+}
+
+body {
+  margin: 0;
+  background: var(--c24-page-bg);
+}
+
+/* 3) DARK MODE: BEWUSST DEAKTIVIERT (appearance="light" in main.tsx gepinnt — check24.de ist
+      Light-only, README-Screenshot ist Light). Vorbereiteter Block für später:
+.radix-themes:is(.dark, .dark-theme) {
+  --accent-1: #0B1A2C;
+  --accent-2: #0E2138;
+  --accent-3: #123056;
+  --accent-9: #0271C2;
+  --accent-10: #3B8FD4;
+  --accent-11: #7CB8E8;
+  --accent-12: #D6EBFB;
+  --accent-contrast: #FFF;
+}
+      Navy-Header #063773 funktioniert in beiden Appearances unverändert. */
+
+/* 4) RADII & SPACING — Radix bleibt Quelle der Wahrheit (radius="large": --radius-3 = 12px).
+      Bild-Parität Web/Android (dokumentieren, nicht ändern): Thumbs 44px (CompactRow),
+      56px (HeroBanner row), Bildhöhe 120px (TextCard), Bild-Radius 12px = var(--radius-3).
+      Abstände: Grid gap="4" (16px), Container size="3", Card size="3" (gepusht) / "2" (Baseline),
+      Navbar-Höhe 56px Desktop / 52px Mobile + 3px Gelb-Keyline. */
+
+/* 5) UTILITIES & KEYFRAMES */
+.c24-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  min-width: 0;
+}
+
+.c24-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Nur für Screenreader sichtbar (Live-Region-Ansagen) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip-Link 'Zum Inhalt springen' — erst bei Tastatur-Fokus sichtbar */
+.c24-skip-link {
+  position: absolute;
+  left: -9999px;
+}
+.c24-skip-link:focus {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  background: var(--c24-navy);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  z-index: 200;
+}
+
+/* Card-Hover/-Press */
+.c24-card {
+  transition:
+    transform var(--c24-dur-fast) var(--c24-ease),
+    box-shadow var(--c24-dur-fast) var(--c24-ease);
+}
+.c24-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(6, 55, 115, 0.10);
+}
+.c24-card:active {
+  transform: translateY(0);
+  transition-duration: 80ms;
+}
+
+/* Hero-Bild-Zoom beim Card-Hover */
+.c24-hero-img img {
+  transition: transform var(--c24-dur-hero) var(--c24-ease);
+}
+.c24-card:hover .c24-hero-img img {
+  transform: scale(1.03);
+}
+
+@keyframes c24-spin {
+  to { transform: rotate(360deg); }
+}
+.c24-spin {
+  animation: c24-spin var(--c24-dur-spin) linear infinite;
+}
+
+@keyframes c24-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.c24-enter {
+  animation: c24-enter var(--c24-dur-enter) var(--c24-ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms); /* --i per Style-Prop, Cap bei 6 */
+}
+
+@keyframes c24-fresh {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 187, 28, 0.65); }
+  70%  { box-shadow: 0 0 0 12px rgba(255, 187, 28, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 187, 28, 0); }
+}
+.c24-fresh {
+  animation: c24-fresh 1.4s ease-out 2;
+}
+/* Beide Klassen zusammen: Entrance UND Puls (die Shorthands würden sich sonst
+   gegenseitig überschreiben — später definierte Regel gewinnt komplett). */
+.c24-enter.c24-fresh {
+  animation:
+    c24-enter var(--c24-dur-enter) var(--c24-ease) both,
+    c24-fresh 1.4s ease-out 2;
+  animation-delay: calc(var(--i, 0) * 40ms), 0s;
+}
+
+/* 6) NAVBAR — sticky Navy-Header mit 3px-Gelb-Keyline (ersetzt nav.css) */
+.c24-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--c24-navy);
+  border-bottom: 3px solid var(--c24-yellow);
+}
+
+.c24-nav-link {
+  color: #fff;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-2);
+  transition: background var(--c24-dur-fast) ease;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+.c24-nav-link:hover {
+  background: var(--c24-navy-hover);
+}
+.c24-nav-link:focus-visible {
+  outline: 2px solid var(--c24-yellow);
+  outline-offset: 2px;
+}
+
+/* Responsive Nav CSS-only — kein useIsMobile, kein Resize-Listener */
+.c24-nav-desktop { display: flex; }
+.c24-nav-burger { display: none; }
+@media (max-width: 767px) {
+  .c24-nav-desktop { display: none; }
+  .c24-nav-burger { display: flex; }
+}
+
+/* Mobile-Panel: bleibt gemountet, animiert über grid-template-rows.
+   visibility nimmt das geschlossene Panel aus Tab-Reihenfolge und A11y-Tree
+   (verzögert um die Menü-Dauer, damit die Zuklapp-Animation sichtbar bleibt). */
+#c24-mobile-nav {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--c24-dur-menu) var(--c24-ease),
+    opacity var(--c24-dur-menu) ease,
+    visibility 0s linear var(--c24-dur-menu);
+}
+#c24-mobile-nav[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows var(--c24-dur-menu) var(--c24-ease),
+    opacity var(--c24-dur-menu) ease,
+    visibility 0s;
+}
+#c24-mobile-nav > div {
+  overflow: hidden;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+/* Auf Desktop existiert das Panel gar nicht (sonst unsichtbare Tab-Stops bzw.
+   ein offen vergessenes Menü nach einem Breakpoint-Wechsel). */
+@media (min-width: 768px) {
+  #c24-mobile-nav {
+    display: none;
+  }
+}
+
+/* 7) GELB-BADGES — Gelb-Disziplin: max. EIN Gelb-Element pro Card
+      ('Für dich'-Badge ODER 'Neu'-Badge ODER Fresh-Ring); Keyline ist die
+      einzige globale Gelb-Fläche. Statusfarben: Fehler=red, Degraded/Stale=amber, Live=--c24-live. */
+.c24-badge-personal {
+  background: var(--c24-yellow);
+  color: var(--c24-on-yellow);
+  font-weight: 600;
+}
+.c24-badge-new {
+  background: var(--c24-yellow-deep);
+  color: var(--c24-on-yellow);
+  font-weight: 600;
+}
+
+/* 8) HERO-GRID — nüchternes Zwei-Zonen-Layout (Text links, Bild rechts ab 768px) */
+.c24-hero-grid {
+  display: grid;
+  gap: 20px;
+}
+@media (min-width: 768px) {
+  .c24-hero-grid {
+    grid-template-columns: 1fr 320px;
+    align-items: center;
+  }
+  /* Mobil steht das Bild (erstes DOM-Kind) oben; ab 768px wandert es per order
+     in die rechte 320px-Spalte, der Text nach links. */
+  .c24-hero-grid > .c24-hero-img {
+    order: 1;
+  }
+}
+
+/* 9) REDUCED MOTION */
+@media (prefers-reduced-motion: reduce) {
+  .c24-card,
+  .c24-enter,
+  .c24-fresh,
+  .c24-spin,
+  .c24-hero-img img,
+  #c24-mobile-nav {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 10) FOKUS — Blau auf hellem Grund, Gelb auf Navy */
+:focus-visible {
+  outline: 2px solid var(--c24-blue);
+  outline-offset: 2px;
+}
+.c24-header :focus-visible,
+#c24-mobile-nav :focus-visible {
+  outline: 2px solid var(--c24-yellow);
+  outline-offset: 2px;
+}

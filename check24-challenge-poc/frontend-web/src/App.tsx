@@ -1,24 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Badge,
-  Box,
-  Button,
-  Callout,
-  Card,
-  Container,
-  Flex,
-  Grid,
-  Heading,
-  Skeleton,
-  Tabs,
-  Text,
-  TextField,
-} from '@radix-ui/themes';
-import { ExclamationTriangleIcon, PersonIcon, ReloadIcon } from '@radix-ui/react-icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Button, Callout, Card, Code, Container, Flex, Grid, Heading, Text } from '@radix-ui/themes';
+import { ClockIcon, ExclamationTriangleIcon, ReloadIcon } from '@radix-ui/react-icons';
 import { fetchHome, getApiBaseUrl, login, register } from './api';
 import type { HomeResponse } from './types';
-import { WidgetRenderer } from './components/WidgetRenderer';
-import { navigateWithSso } from './sso';
+import { LoginScreen } from './components/LoginScreen';
+import { Navbar } from './components/Navbar';
+import { StatusChip } from './components/StatusChip';
+import { WelcomeCard } from './components/WelcomeCard';
+import { FeedSkeleton } from './components/FeedSkeleton';
+import { WidgetRenderer, isBaselineWidget } from './components/WidgetRenderer';
 
 const TOKEN_STORAGE_KEY = 'c24_token';
 const USER_STORAGE_KEY = 'c24_user';
@@ -26,29 +16,8 @@ const USER_STORAGE_KEY = 'c24_user';
 type User = { email: string };
 
 /**
- * Tracks whether viewport is below mobile breakpoint via window resize events.
- * Uses lazy state initialization to avoid measuring on every render.
- * Cleanup removes event listener to prevent memory leaks on unmount.
- * @param breakpointPx - Width threshold in pixels (default: 720)
- * @returns true if window.innerWidth < breakpointPx
- */
-function useIsMobile(breakpointPx = 720) {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
-
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [breakpointPx]);
-
-  return isMobile;
-}
-
-/**
  * Normalizes URLs by removing trailing slashes for consistent deeplink construction.
  * Prevents duplicate slashes when appending query params (e.g., ?handoff=code).
- * @param value - Raw URL from environment variables
- * @returns Trimmed URL without trailing slash, or empty string if invalid
  */
 function normalizeUrl(value: string | undefined): string {
   const v = (value ?? '').trim();
@@ -56,92 +25,118 @@ function normalizeUrl(value: string | undefined): string {
   return v.endsWith('/') ? v.slice(0, -1) : v;
 }
 
-/**
- * Retrieves JWT token from localStorage for session persistence.
- * Nullish coalescing ensures return type is never null (defaults to empty string).
- * @returns JWT token or empty string if not found
- */
+/** Retrieves JWT token from localStorage for session persistence. */
 function loadToken(): string {
   return localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
 }
 
-/**
- * Deserializes user object from localStorage JSON string.
- * Returns null instead of throwing on invalid JSON (fail-safe pattern).
- * @returns User object with email, or null if not found/invalid
- */
-function loadUser(): { email: string } | null {
-  const stored = localStorage.getItem(USER_STORAGE_KEY);
-  return stored ? JSON.parse(stored) : null;
+/** Deserializes user object from localStorage (null on missing/invalid — fail-safe). */
+function loadUser(): User | null {
+  try {
+    const stored = localStorage.getItem(USER_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
 }
 
-/**
- * Persists authentication state to localStorage after successful login/register.
- * Synchronous operation - no async storage APIs needed for PoC.
- * @param token - JWT token from backend /api/auth/login or /api/auth/register
- * @param user - User object containing at least email property
- */
-function saveAuth(token: string, user: { email: string }) {
+/** Persists authentication state to localStorage after successful login/register. */
+function saveAuth(token: string, user: User) {
   localStorage.setItem(TOKEN_STORAGE_KEY, token);
   localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
 }
 
-/**
- * Removes authentication state from localStorage on logout.
- * Companion to saveAuth - ensures clean logout without orphaned tokens.
- */
+/** Removes authentication state from localStorage on logout. */
 function clearAuth() {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
 }
 
 /**
- * Manages widget feed state with automatic fetching on mount and manual refresh.
- * Uses 'enabled' flag to prevent API calls when user is logged out.
- * Implements cleanup pattern (cancelled flag) to avoid state updates after unmount.
- * IIFE pattern inside useEffect required because useEffect cannot be async directly.
- * @param token - JWT token for Authorization header
- * @param enabled - Controls whether auto-fetch runs (typically Boolean(token))
- * @returns {data, error, isLoading, refresh} - Widget data and control functions
+ * Verwaltet den Widget-Feed: Auto-Fetch bei Login, manueller Refresh (mit
+ * regenerateAI) und Fresh-Erkennung. prevStampsRef merkt sich pro Widget den
+ * letzten generatedAt-Stempel — nach jedem Refresh sind genau die Widgets
+ * 'fresh', die neu sind ODER einen neueren Stempel tragen (erkennt Re-Pushes).
+ * Beim Erstladen pulst nichts (Ref ist noch null).
  */
 function useHomeFeed(token: string, enabled: boolean) {
   const [data, setData] = useState<HomeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+  const prevStampsRef = useRef<Map<string, string> | null>(null);
 
-  /**
-   * Manually triggers widget refresh with AI message regeneration.
-   * Passes regenerateAI=true to backend to invoke OpenRouter LLM.
-   * Exposes loading/error states for UI feedback (button spinner, error callout).
-   */
+  const applyResponse = (response: HomeResponse) => {
+    const stamps = new Map(response.widgets.map((w) => [`${w.productId}:${w.widgetId}`, w.generatedAt]));
+    const prev = prevStampsRef.current;
+    if (prev !== null) {
+      const fresh = new Set<string>();
+      for (const widget of response.widgets) {
+        // Baseline-Widgets stempelt das Backend bei jedem Request neu (generatedAt
+        // = jetzt) — sie sind nie 'frisch gepusht' und dürfen nicht pulsen.
+        if (isBaselineWidget(widget)) continue;
+        const id = `${widget.productId}:${widget.widgetId}`;
+        const prevStamp = prev.get(id);
+        if (prevStamp === undefined) {
+          fresh.add(id);
+          continue;
+        }
+        const prevTs = Date.parse(prevStamp);
+        const nextTs = Date.parse(widget.generatedAt);
+        const isNewer =
+          Number.isNaN(prevTs) || Number.isNaN(nextTs) ? widget.generatedAt !== prevStamp : nextTs > prevTs;
+        if (isNewer) fresh.add(id);
+      }
+      setFreshIds(fresh);
+    } else {
+      setFreshIds(new Set());
+    }
+    prevStampsRef.current = stamps;
+    setData(response);
+  };
+
+  // Harter Reset beim Nutzerwechsel — sonst sieht User B kurz User As Feed und
+  // der komplette Feed pulst als 'Neu' (prevStampsRef wäre noch gefüllt).
+  const reset = () => {
+    setData(null);
+    setError(null);
+    setIsLoading(false);
+    setFreshIds(new Set());
+    prevStampsRef.current = null;
+  };
+
+  // Manueller Refresh — regenerateAI=true lässt Home-Core den Welcome-Text neu erzeugen.
   const refresh = async () => {
     if (!token) return;
     setIsLoading(true);
     setError(null);
     try {
       const response = await fetchHome(token, true);
-      setData(response);
+      applyResponse(response);
     } catch (e: any) {
-      setError(e?.message ?? 'Unknown error');
+      console.error(e);
+      setError(e?.message ?? 'Unbekannter Fehler');
     } finally {
       setIsLoading(false);
     }
   };
 
-
-  // executed as soon as enabled or token value changes
+  // Auto-Fetch, sobald ein Token vorliegt (cancelled-Flag gegen Unmount-Races).
   useEffect(() => {
-    if (!enabled || !token) return; // check if allowed to fetch
-    let cancelled = false; // Prevent state updates after unmount, race conditions
+    if (!enabled || !token) return;
+    let cancelled = false;
 
     (async () => {
       setIsLoading(true);
       setError(null);
       try {
         const response = await fetchHome(token);
-        if (!cancelled) setData(response);
+        if (!cancelled) applyResponse(response);
       } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? 'Unknown error');
+        if (!cancelled) {
+          console.error(e);
+          setError(e?.message ?? 'Unbekannter Fehler');
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -150,421 +145,194 @@ function useHomeFeed(token: string, enabled: boolean) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, token]);
 
-  return { data, error, isLoading, refresh };
+  return { data, error, isLoading, refresh, freshIds, reset };
 }
 
 /**
- * Skeleton placeholder grid for initial widget loading state.
- * Prevents layout shift by rendering empty cards with pulsing Skeleton components.
- * Uses responsive columns (1 on mobile, 2 on desktop) matching actual widget grid.
- * @returns 3 skeleton cards mimicking widget structure
+ * Reine Orchestrierung: Auth-State + Feed-Hook, darunter LoginScreen ODER der
+ * Feed aus Navbar/StatusChip/WelcomeCard/WidgetRenderer. Responsivität lebt
+ * CSS-only in der Navbar; ?debug=1 schaltet widgetId/priority/meta.source frei.
  */
-function LoadingGrid() {
-  return (
-    <Grid columns={{ initial: '1', md: '2' }} gap="3">
-      {[0, 1, 2].map((i) => (
-        <Card key={i} size="3">
-          <Flex direction="column" gap="2">
-            <Skeleton style={{ height: 16, width: '55%' }} />
-            <Skeleton style={{ height: 12, width: '85%' }} />
-            <Skeleton style={{ height: 12, width: '78%' }} />
-          </Flex>
-        </Card>
-      ))}
-    </Grid>
-  );
-}
-
-/**
- * Main application component managing authentication state and widget feed.
- * Conditional rendering: Login screen (unauthenticated) vs. Home feed (authenticated).
- * 
- * Architecture:
- * - Token/user persisted in localStorage for session continuity
- * - SSO navigation via navigateWithSso (handoff code exchange)
- * - Responsive layout: mobile hamburger menu vs. desktop horizontal nav
- * - Widget feed uses push model (Speedboats → Home-Core → Redis → Frontend)
- * 
- * @returns Login UI or authenticated Home feed with widgets
- */
-
 export function App() {
-  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []); // Value stays for whole session
+  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
 
-  // Speedboat frontend URLs - normalized once, used for SSO deeplinks
-  const travelWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_TRAVEL_WEB_URL), []); // Value stays for whole session
+  // Speedboat-Frontend-URLs — einmal normalisiert, für SSO-Deeplinks genutzt
+  const travelWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_TRAVEL_WEB_URL), []);
   const dslWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_DSL_WEB_URL), []);
   const insuranceWebUrl = useMemo(() => normalizeUrl(import.meta.env.VITE_INSURANCE_WEB_URL), []);
 
-  const [token, setToken] = useState<string>(() => loadToken()); // Value stays for whole session
+  const [token, setToken] = useState<string>(() => loadToken());
   const [user, setUser] = useState<User | null>(() => loadUser());
 
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login'); // initial auth mode to login
-  const [email, setEmail] = useState<string>('demo@check24.dev');
-  const [password, setPassword] = useState<string>('');
-  const [authError, setAuthError] = useState<string | null>(null);
+  // Debug-Modus als Feature (?debug=1): zeigt widgetId/priority, API-URL und meta.source.
+  const isDebug = useMemo(() => new URLSearchParams(window.location.search).has('debug'), []);
 
-  const isMobile = useIsMobile();
-  const [isNavOpen, setIsNavOpen] = useState(false);
+  const { data, error, isLoading, refresh, freshIds, reset } = useHomeFeed(token, Boolean(token));
 
-  // Fetch widgets only when authenticated (enabled = Boolean(token))
-  const { data, error, isLoading, refresh } = useHomeFeed(token, Boolean(token));
+  // Screenreader-Ansage nach jedem Refresh (nicht beim Erstladen).
+  const [announcement, setAnnouncement] = useState<string>('');
+  const prevDataRef = useRef<HomeResponse | null>(null);
+  useEffect(() => {
+    if (data && prevDataRef.current) {
+      setAnnouncement(`Startseite aktualisiert, ${data.widgets.length} Empfehlungen`);
+    }
+    prevDataRef.current = data;
+  }, [data]);
 
-  /**
-   * Clears authentication state and returns to login screen.
-   * Synchronous operation - no backend call needed (JWT is stateless).
-   */
   const logout = () => {
     clearAuth();
     setToken('');
     setUser(null);
+    reset();
   };
 
-  // Auto-close mobile nav when resizing to desktop
-  useEffect(() => {
-    if (!isMobile) setIsNavOpen(false);
-  }, [isMobile]);
-
-  /**
-   * Handles form submission for both login and registration.
-   * Prevents default form behavior (page reload) via e.preventDefault().
-   * On success: persists token/user to localStorage and updates state (triggers re-render to Home).
-   * On error: displays error message in Callout without blocking form.
-   */
-  const onSubmitAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-
-    try {
-      const response = authMode === 'login' ? await login(email, password) : await register(email, password);
-      saveAuth(response.token, response.user);
-      setToken(response.token);
-      setUser({ email: response.user.email });
-    } catch (err: any) {
-      setAuthError(err?.message ?? 'Auth failed');
-    }
+  // Auth-Call für den LoginScreen — Fehler werden weitergeworfen, der Screen
+  // fängt sie und zeigt eine deutsche Meldung.
+  const handleAuth = async (mode: 'login' | 'register', email: string, password: string) => {
+    const response = mode === 'login' ? await login(email, password) : await register(email, password);
+    saveAuth(response.token, { email: response.user.email });
+    setToken(response.token);
+    setUser({ email: response.user.email });
   };
 
-    // Render login/register screen for unauthenticated users
-    if (!token) {
-      return (
-        <Box style={{ minHeight: '100vh' }}>
-          <Box style={{ backgroundColor: 'var(--c24-navbar-blue)', color: 'var(--gray-1)' }}>
-            <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
-              <Flex align="center" gap="2" wrap="wrap">
-                <Heading size="4" style={{ color: 'var(--gray-1)' }}>
-                  CHECK24
-                </Heading>
-                <Text size="2" style={{ color: 'var(--gray-1)' }}>
-                  Home
-                </Text>
-              </Flex>
-            </Container>
-          </Box>
-          <Container size="2" style={{ paddingTop: 72, paddingBottom: 72 }}>
-            <Flex direction="column" align="center" gap="5">
-              <Box style={{ width: '100%', maxWidth: 520 }}>
-                <Card size="4">
-                  <Flex direction="column" gap="4">
-                    <Flex direction="column" gap="1">
-                      <img
-                        src="https://images.unsplash.com/photo-1551434678-e076c223a692?w=640&h=160&fit=crop"
-                        alt=""
-                        style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 12 }}
-                      />
-                      <Heading size="6">CHECK24 Home (PoC)</Heading>
-                      <Text color="gray" size="2">
-                        API: <Badge color="gray">{apiBaseUrl}</Badge>
-                      </Text>
-                    </Flex>
+  if (!token) {
+    return <LoginScreen onSubmit={handleAuth} isDebug={isDebug} apiBaseUrl={apiBaseUrl} />;
+  }
 
-                    <Tabs.Root
-                      value={authMode}
-                      onValueChange={(v) => {
-                        setAuthError(null);
-                        setAuthMode(v as 'login' | 'register');
-                      }}
-                    >
-                      <Tabs.List>
-                        <Tabs.Trigger value="login">Login</Tabs.Trigger>
-                        <Tabs.Trigger value="register">Register</Tabs.Trigger>
-                      </Tabs.List>
-                    </Tabs.Root>
-
-                    {authError ? (
-                      <Callout.Root color="red" role="alert">
-                        <Callout.Icon>
-                          <ExclamationTriangleIcon />
-                        </Callout.Icon>
-                        <Callout.Text>{authError}</Callout.Text>
-                      </Callout.Root>
-                    ) : null}
-
-                    <Box asChild>
-                      <form onSubmit={onSubmitAuth}>
-                        <Flex direction="column" gap="3">
-                          <Flex direction="column" gap="2">
-                            <Text as="label" size="2" weight="bold" color="gray">
-                              E-Mail
-                            </Text>
-                            <TextField.Root
-                              placeholder="demo@check24.dev"
-                              value={email}
-                              onChange={(e) => setEmail(e.target.value)}
-                            >
-                              <TextField.Slot>
-                                <PersonIcon />
-                              </TextField.Slot>
-                            </TextField.Root>
-                          </Flex>
-
-                          <Flex direction="column" gap="2">
-                            <Text as="label" size="2" weight="bold" color="gray">
-                              Password
-                            </Text>
-                            <TextField.Root
-                              type="password"
-                              placeholder="demo"
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                            />
-                          </Flex>
-
-                          <Button type="submit" size="3">
-                            {authMode === 'login' ? 'Login' : 'Register'}
-                          </Button>
-
-                          <Text size="1" color="gray">
-                            Hinweis: Token wird im LocalStorage gespeichert (PoC).
-                          </Text>
-                        </Flex>
-                      </form>
-                    </Box>
-                  </Flex>
-                </Card>
-              </Box>
-            </Flex>
-          </Container>
-        </Box>
-      );
-    }
+  const navLinks = [
+    { label: 'Reisen', url: travelWebUrl },
+    { label: 'DSL', url: dslWebUrl },
+    { label: 'Versicherung', url: insuranceWebUrl },
+  ].filter((l) => l.url);
 
   return (
-      <Box style={{ minHeight: '100vh' }}>
-      <Box style={{ backgroundColor: 'var(--c24-navbar-blue)', color: 'var(--gray-1)' }}>
-          <Container size="3" style={{ paddingTop: 14, paddingBottom: 14 }}>
-            <Flex direction="column" gap="2">
-              <Flex align="center" gap="4" wrap="wrap">
-                <Flex align="center" gap="2" style={{ minWidth: 220 }}>
-                  <Heading size="4" style={{ color: 'var(--gray-1)' }}>
-                    CHECK24
-                  </Heading>
-                  <Text size="2" style={{ color: 'var(--gray-1)' }}>
-                    Home
-                  </Text>
-                </Flex>
+    <Box style={{ minHeight: '100vh' }}>
+      <a href="#main" className="c24-skip-link">
+        Zum Inhalt springen
+      </a>
 
-                {!isMobile ? (
-                  <Flex align="center" gap="5" wrap="wrap">
-                    {travelWebUrl ? (
-                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)' }}>
-                        <a
-                          className="c24-nav-link"
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigateWithSso(travelWebUrl);
-                          }}
-                        >
-                          Reisen
-                        </a>
-                      </Button>
-                    ) : null}
-                    {dslWebUrl ? (
-                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)' }}>
-                        <a
-                          className="c24-nav-link"
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigateWithSso(dslWebUrl);
-                          }}
-                        >
-                          DSL
-                        </a>
-                      </Button>
-                    ) : null}
-                    {insuranceWebUrl ? (
-                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)' }}>
-                        <a
-                          className="c24-nav-link"
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigateWithSso(insuranceWebUrl);
-                          }}
-                        >
-                          Versicherung
-                        </a>
-                      </Button>
-                    ) : null}
-                  </Flex>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    style={{ color: 'var(--gray-1)', marginLeft: 'auto' }}
-                    onClick={() => setIsNavOpen((v) => !v)}
-                  >
-                    {isNavOpen ? 'Schließen' : 'Menü'}
-                  </Button>
-                )}
+      <Navbar user={user} onLogout={logout} links={navLinks} />
 
-                {!isMobile ? (
-                  <Flex align="center" gap="3" style={{ marginLeft: 'auto' }}>
-                    <Text size="2" style={{ color: 'var(--gray-1)' }}>
-                      {user?.email}
-                    </Text>
-                    <Button variant="ghost" style={{ color: 'var(--gray-1)' }} onClick={logout}>
-                      Logout
-                    </Button>
-                  </Flex>
-                ) : null}
-              </Flex>
-
-              {isMobile && isNavOpen ? (
-                <Flex direction="column" gap="2" style={{ paddingBottom: 6 }}>
-                  <Flex align="center" gap="5" wrap="wrap">
-                    {travelWebUrl ? (
-                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)', justifyContent: 'flex-start' }}>
-                        <a
-                          className="c24-nav-link"
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigateWithSso(travelWebUrl);
-                          }}
-                        >
-                          Reisen
-                        </a>
-                      </Button>
-                    ) : null}
-                    {dslWebUrl ? (
-                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)', justifyContent: 'flex-start' }}>
-                        <a
-                          className="c24-nav-link"
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigateWithSso(dslWebUrl);
-                          }}
-                        >
-                          DSL
-                        </a>
-                      </Button>
-                    ) : null}
-                    {insuranceWebUrl ? (
-                      <Button asChild variant="ghost" style={{ color: 'var(--gray-1)', justifyContent: 'flex-start' }}>
-                        <a
-                          className="c24-nav-link"
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigateWithSso(insuranceWebUrl);
-                          }}
-                        >
-                          Versicherung
-                        </a>
-                      </Button>
-                    ) : null}
-                  </Flex>
-
-                  <Flex align="center" gap="3" wrap="wrap">
-                    <Text size="2" style={{ color: 'var(--gray-1)' }}>
-                      {user?.email}
-                    </Text>
-                    <Button variant="ghost" style={{ color: 'var(--gray-1)' }} onClick={logout}>
-                      Logout
-                    </Button>
-                  </Flex>
-                </Flex>
-              ) : null}
-            </Flex>
-          </Container>
-        </Box>
-
-        <Container size="3" style={{ paddingTop: 20, paddingBottom: 36 }}>
-          <Flex direction="column" gap="4">
-            <Flex direction="column" gap="3">
-              <Heading size="6">Dein Home</Heading>
-              {/* AI welcome message from Home-Core (OpenRouter LLM) */}
-              {data?.welcomeText ? (
-                <Card size="2">
-                  <Flex direction="column" gap="2">
-                    <Flex justify="between" align="center">
-                      <Badge color="purple" variant="solid">
-                        AI Generated Message
-                      </Badge>
-                      <Button size="1" variant="ghost" onClick={refresh}>
-                        <ReloadIcon /> Refresh Message
-                      </Button>
-                    </Flex>
-                    <Text size="3" style={{ lineHeight: 1.5 }}>
-                      {data.welcomeText}
-                    </Text>
-                  </Flex>
-                </Card>
-              ) : (
-                <Text color="gray" size="2">
-                  {/* Architecture: Speedboats push widgets to Redis, Home reads on-demand */}
-                  Push-basierte Widgets mit Baseline-on-read (min. 3) und Signalen.
-                </Text>
-              )}
-            </Flex>
-
-            <Flex gap="2" align="center" wrap="wrap">
-              <Button variant="soft" onClick={refresh}>
-                <Flex align="center" gap="2">
-                  <ReloadIcon /> Refresh
-                </Flex>
+      {/* Degraded-Banner: erklärt den 3-Layer-Fallback in Nutzersprache */}
+      {data?.meta?.degraded ? (
+        <Container size="3" px="4" style={{ paddingTop: 16 }}>
+          <Callout.Root color="amber" variant="surface" role="status" className="c24-enter">
+            <Callout.Icon>
+              <ClockIcon />
+            </Callout.Icon>
+            <Callout.Text>
+              {data.meta.source === 'lkg'
+                ? 'Der Empfehlungsdienst ist gerade nicht erreichbar. Du siehst deine zuletzt geladenen Inhalte.'
+                : 'Persönliche Empfehlungen sind gerade nicht verfügbar – hier sind unsere beliebtesten Vergleiche.'}{' '}
+              <Button size="1" variant="ghost" onClick={refresh}>
+                Erneut versuchen
               </Button>
-              {isLoading ? <Badge color="gray">Lädt…</Badge> : null}
-              {data ? <Badge color="gray">Widgets: {data.widgets.length}</Badge> : null}
+            </Callout.Text>
+          </Callout.Root>
+        </Container>
+      ) : null}
+
+      <main id="main">
+        <Container size="3" px="4" style={{ paddingTop: 24, paddingBottom: 48 }}>
+          <Flex direction="column" gap="4">
+            {/* Kopfzeile: Server-greeting als H1, rechts StatusChip + Refresh */}
+            <Flex justify="between" align="center" wrap="wrap" gap="3">
+              <Heading as="h1" size="7">
+                {data?.greeting || 'Dein Home'}
+              </Heading>
+              <Flex gap="3" align="center">
+                <StatusChip
+                  meta={data?.meta}
+                  generatedAt={data?.generatedAt}
+                  isLoading={isLoading}
+                  hasError={Boolean(error)}
+                />
+                {isDebug ? (
+                  <Code size="1" color="gray">
+                    source: {data?.meta?.source ?? 'live'}
+                  </Code>
+                ) : null}
+                <Button variant="soft" size="2" disabled={isLoading} onClick={refresh}>
+                  <ReloadIcon className={isLoading ? 'c24-spin' : undefined} /> Aktualisieren
+                </Button>
+              </Flex>
             </Flex>
 
-            {error ? (
+            {data?.welcomeText ? <WelcomeCard welcomeText={data.welcomeText} /> : null}
+
+            {/* Refresh fehlgeschlagen, alter Stand steht noch — clientseitige LKG-Spiegelung */}
+            {error && data ? (
+              <Callout.Root color="amber" variant="surface" role="status">
+                <Callout.Icon>
+                  <ExclamationTriangleIcon />
+                </Callout.Icon>
+                <Callout.Text>
+                  Aktualisierung fehlgeschlagen – du siehst den letzten Stand.{' '}
+                  <Button size="1" variant="ghost" onClick={refresh}>
+                    Erneut versuchen
+                  </Button>
+                </Callout.Text>
+              </Callout.Root>
+            ) : null}
+
+            {error && !data ? (
               <Callout.Root color="red" role="alert">
                 <Callout.Icon>
                   <ExclamationTriangleIcon />
                 </Callout.Icon>
                 <Callout.Text>
-                  Fehler beim Laden: {error}
+                  Deine Startseite konnte gerade nicht geladen werden.
                   <Box style={{ marginTop: 10 }}>
-                    <Button onClick={refresh}>Retry</Button>
+                    <Button variant="soft" onClick={refresh}>
+                      Erneut versuchen
+                    </Button>
                   </Box>
                 </Callout.Text>
               </Callout.Root>
             ) : null}
 
-            {isLoading && !data ? <LoadingGrid /> : null}
+            {isLoading && !data ? <FeedSkeleton /> : null}
 
-            {/* Empty state - should never happen due to baseline-on-read (min 3 widgets) */}
+            {/* Leerer Feed — sollte dank Baseline-on-read (min. 3 Widgets) nie eintreten */}
             {!isLoading && data && data.widgets.length === 0 ? (
-              <Callout.Root color="amber" role="status">
-                <Callout.Text>
-                  Keine Widgets. Falls das passiert, ist das ein Bug — Baseline-on-read sollte min. 3 liefern.
-                </Callout.Text>
-              </Callout.Root>
+              <Card size="4" className="c24-enter">
+                <Flex direction="column" align="center" gap="3" style={{ padding: 24, textAlign: 'center' }}>
+                  <img src="/Logo_CHECK24.png" alt="" aria-hidden="true" style={{ height: 40, opacity: 0.25 }} />
+                  <Heading as="h2" size="4">
+                    Gerade keine Empfehlungen
+                  </Heading>
+                  <Text color="gray">
+                    Schau später wieder vorbei oder starte einen Vergleich über die Navigation.
+                  </Text>
+                  <Button variant="soft" onClick={refresh}>
+                    Aktualisieren
+                  </Button>
+                </Flex>
+              </Card>
             ) : null}
 
             {data && data.widgets.length > 0 ? (
-              <Grid columns={{ initial: '1', md: '2' }} gap="3">
-                <WidgetRenderer widgets={data.widgets} />
+              // KEIN key={generatedAt}-Remount: der Fresh-Puls einzelner Cards trägt
+              // den Demo-Moment, der restliche Feed bleibt ruhig (Fokus/Scroll erhalten).
+              <Grid
+                columns={{ initial: '1', sm: '2' }}
+                gap="4"
+                aria-busy={isLoading}
+                style={{ opacity: isLoading && data ? 0.7 : 1, transition: 'opacity 160ms ease' }}
+              >
+                <WidgetRenderer widgets={data.widgets} freshIds={freshIds} isDebug={isDebug} />
               </Grid>
             ) : null}
+
+            <div role="status" aria-live="polite" className="sr-only">
+              {announcement}
+            </div>
           </Flex>
         </Container>
-      </Box>
+      </main>
+    </Box>
   );
 }
