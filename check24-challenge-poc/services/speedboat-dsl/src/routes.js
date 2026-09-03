@@ -60,7 +60,7 @@ function registerRoutes(fastify, { coreUrl, ingestApiKey, productId, productWebU
 					title: `${offerDisplayTitle || TEMPLATE.title} für dich`,
 					subtitle: offerDisplaySubtitle || TEMPLATE.subtitle,
 					price: `${price} €`,
-					imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=150&h=150&fit=crop',
+					imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&h=450&fit=crop',
 					cta: { label: TEMPLATE.cta, action: 'deeplink', deeplink: buildOfferDeeplink(id, productWebUrl, productId) },
 				},
 			},
