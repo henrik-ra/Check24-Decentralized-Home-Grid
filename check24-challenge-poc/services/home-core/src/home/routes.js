@@ -73,7 +73,12 @@ function registerHomeRoutes(fastify, { redis }) {
 
 				try {
 					const widget = JSON.parse(raw);
-					const affinityScore = Number.parseFloat(affinities?.[widget.productId] || '0');
+					// Affinity-Felder werden beim Signal mit dem rohen x-product-id-Header
+					// geschrieben ('travel'), Widgets tragen productId in Großschreibung
+					// ('TRAVEL') — daher case-insensitiv nachschlagen, sonst boostet nie etwas.
+					const affinityRaw =
+						affinities?.[widget.productId] ?? affinities?.[String(widget.productId || '').toLowerCase()];
+					const affinityScore = Number.parseFloat(affinityRaw || '0');
 					const boost = affinityScore * 20;
 					widget.priority = (widget.priority || 0) + boost;
 					if (boost > 0) {
