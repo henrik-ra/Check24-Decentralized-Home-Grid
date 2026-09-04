@@ -77,14 +77,17 @@ The deployment includes **Azure Container Apps** (Backend), **Azure Cache for Re
 ### 2. Run Deployment Script
 The deploy.ps1 script handles resource provisioning, building, and deployment.
 
-**⚠️ Demo Credentials (PoC Only):**
-For easy evaluation, this PoC includes MongoDB credentials and a demo JWT secret. **In production, these must NEVER be committed to Git.** Use Azure Key Vault + Managed Identities instead.
+**Security note for this public repository:**
+This project must be deployed with secrets supplied through environment variables or a secret manager. Do not commit MongoDB connection strings, JWT secrets, API keys, or other credentials to Git. For Azure, use Azure Key Vault with Managed Identities.
+
+**Credential rotation notice:**
+The demo credentials that were previously included for the challenge submission have been revoked and rotated. They are no longer valid and are not required to run this repository.
 
 ```powershell
 cd check24-challenge-poc
 ./infra/azure/deploy.ps1 `
-  -MongoDbUri "mongodb+srv://henrikrathai_db_user:9xP2ownqoZjTIN25@check24-challenge.wdumtpj.mongodb.net/" `
-  -JwtSecret "dev-123-test"
+  -MongoDbUri $env:MONGODB_URI `
+  -JwtSecret $env:JWT_SECRET
 ```
 
 **What this does:**
@@ -94,7 +97,7 @@ cd check24-challenge-poc
 4. Builds and uploads Static Web Apps (Home + 3 Product frontends).
 5. Prints the **Public URLs** for the live environment.
 
-**Note:** An OpenRouter API key for LLM-based welcome messages is already included in the script (demo purposes). You can override it with `-OpenRouterApiKey "sk-or-v1-..."` if needed.
+**Note:** The OpenRouter API key is optional and must be supplied through an environment variable or the `-OpenRouterApiKey` parameter. Never commit the key to the repository.
 
 See `check24-challenge-poc/infra/azure/` for advanced configuration.
 

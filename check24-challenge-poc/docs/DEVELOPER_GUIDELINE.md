@@ -129,14 +129,17 @@ For offline development or when Azure is unavailable:
 
 To deploy the full stack (including your Speedboat) to Azure:
 
-**⚠️ Demo Credentials (PoC Only):**
-The following MongoDB URI and JWT secret are provided for easy PoC evaluation. **In production, use Azure Key Vault and never commit secrets to Git.**
+**Security note for this public repository:**
+Supply MongoDB credentials and JWT secrets through environment variables or a secret manager. Never commit secrets to Git. For Azure deployments, use Azure Key Vault with Managed Identities.
+
+**Credential rotation notice:**
+The demo credentials that were previously used for the challenge submission have been revoked and rotated. They are no longer valid and must not be restored.
 
 ```powershell
 cd check24-challenge-poc
 ./infra/azure/deploy.ps1 `
-  -MongoDbUri "mongodb+srv://henrikrathai_db_user:9xP2ownqoZjTIN25@check24-challenge.wdumtpj.mongodb.net/" `
-  -JwtSecret "dev-123-test"
+  -MongoDbUri $env:MONGODB_URI `
+  -JwtSecret $env:JWT_SECRET
 ```
 
 This script:

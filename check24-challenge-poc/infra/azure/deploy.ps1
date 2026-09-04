@@ -40,7 +40,7 @@ param(
   [string]$DemoUserId = "demo@example.com",
 
   [Parameter(Mandatory = $false)]
-  [string]$OpenRouterApiKey = "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"
+  [string]$OpenRouterApiKey = ""
 )
 
 # ==============================================================================
@@ -84,6 +84,9 @@ if ([string]::IsNullOrWhiteSpace($MongoDbUri)) {
 }
 if ([string]::IsNullOrWhiteSpace($JwtSecret)) {
   $JwtSecret = $env:JWT_SECRET
+}
+if ([string]::IsNullOrWhiteSpace($OpenRouterApiKey)) {
+  $OpenRouterApiKey = $env:OPENROUTER_API_KEY
 }
 
 if ([string]::IsNullOrWhiteSpace($MongoDbUri)) {
